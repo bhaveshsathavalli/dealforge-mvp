@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "@clerk/nextjs": "^6.32.0",
+    "openai": "^5.19.1"
+  }
+}

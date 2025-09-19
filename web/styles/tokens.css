@@ -1,0 +1,138 @@
+/* DealForge Design Tokens */
+
+:root {
+  /* Light Theme Colors */
+  --bg: #ffffff;
+  --surface: #f6f5f3;
+  --surface-alt: #faf9f7;
+  --text: #1a1a1a;
+  --text-muted: #6b7280;
+  --text-subtle: #9ca3af;
+  --border: #e8e8e8;
+  --divider: #f3f4f6;
+  
+  /* Primary Colors */
+  --primary: #F2C94C;
+  --primary-weak: #FFF9E5;
+  --primary-strong: #D7A62C;
+  
+  /* Status Colors */
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --info: #3b82f6;
+  
+  /* Accent Colors */
+  --accent-dashboard: #8b5cf6;
+  --accent-competitors: #06b6d4;
+  --accent-battlecards: #f97316;
+  --accent-updates: #84cc16;
+  --accent-settings: #6366f1;
+  
+  /* Focus Ring */
+  --focus-ring: 2px solid var(--primary);
+  --focus-ring-offset: 2px;
+}
+
+[data-theme='dark'] {
+  /* Dark Theme Colors - Original */
+  --bg: #202020;
+  --surface: #262626;
+  --surface-alt: #1a1a1a;
+  --text: #ffffff;
+  --text-muted: #9ca3af;
+  --text-subtle: #6b7280;
+  --border: #2a2a2a;
+  --divider: #374151;
+  
+  /* Primary Colors (same for both themes) */
+  --primary: #F2C94C;
+  --primary-weak: #FFF9E5;
+  --primary-strong: #D7A62C;
+  
+  /* Status Colors */
+  --success: #34d399;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --info: #60a5fa;
+  
+  /* Accent Colors */
+  --accent-dashboard: #a78bfa;
+  --accent-competitors: #22d3ee;
+  --accent-battlecards: #fb923c;
+  --accent-updates: #a3e635;
+  --accent-settings: #818cf8;
+}
+
+/* Global Accessibility Styles */
+* {
+  box-sizing: border-box;
+}
+
+*:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: 4px;
+}
+
+/* Reduced Motion Support */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  
+  /* Disable shimmer effects */
+  .shimmer,
+  [class*="shimmer"],
+  [class*="animate-pulse"] {
+    animation: none !important;
+  }
+  
+  /* Use faster transitions for reduced motion */
+  * {
+    transition-duration: 120ms !important;
+  }
+}
+
+/* Base Body Styles */
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Smooth theme transitions */
+* {
+  transition: background-color 200ms ease, color 200ms ease, border-color 200ms ease;
+}
+
+/* Improved text readability in result boxes */
+[data-theme='dark'] .bg-card p {
+  color: #e5e7eb !important; /* Light gray for better contrast */
+}
+
+[data-theme='dark'] .bg-card .text-sm {
+  color: #d1d5db !important; /* Even lighter for small text */
+}
+
+/* Container utilities */
+.container {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+@media (min-width: 1536px) {
+  .container {
+    max-width: 1536px;
+    padding: 0 1.5rem;
+  }
+}
