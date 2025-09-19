@@ -19,19 +19,14 @@ export type CompareRow = {
 
 export async function buildCompareTable(runId: string): Promise<CompareRow[]> {
   const { userId, orgId } = await auth();
-  
+
   if (!userId || !orgId) {
     throw new Error('Authentication required');
   }
 
   const supabase = await createClient();
 
-  // Handle demo runs
-  if (runId === 'demo') {
-    return getDemoCompareData();
-  }
-
-  // 1) Load run (org-scoped)
+  // 1) Load the run (org-scoped) from 'query_runs' by id; throw if not found
   const { data: run, error: runError } = await supabase
     .from('query_runs')
     .select('id, query_text, clerk_org_id')
@@ -43,7 +38,7 @@ export async function buildCompareTable(runId: string): Promise<CompareRow[]> {
     throw new Error('Run not found or access denied');
   }
 
-  // 2) Fetch claims + citations by run_id
+  // 2) Fetch 'claims' and 'citations' where run_id = runId
   const { data: claims, error: claimsError } = await supabase
     .from('claims')
     .select(`
@@ -86,7 +81,9 @@ export async function buildCompareTable(runId: string): Promise<CompareRow[]> {
   const pricingClaims = claims?.filter(claim =>
     claim.text.toLowerCase().includes('pricing') ||
     claim.text.toLowerCase().includes('cost') ||
-    claim.text.toLowerCase().includes('price')
+    claim.text.toLowerCase().includes('price') ||
+    claim.text.toLowerCase().includes('subscription') ||
+    claim.text.toLowerCase().includes('plan')
   ) || [];
 
   if (pricingClaims.length > 0) {
@@ -109,7 +106,8 @@ export async function buildCompareTable(runId: string): Promise<CompareRow[]> {
   const featureClaims = claims?.filter(claim =>
     claim.text.toLowerCase().includes('feature') ||
     claim.text.toLowerCase().includes('plan') ||
-    claim.text.toLowerCase().includes('tier')
+    claim.text.toLowerCase().includes('tier') ||
+    claim.text.toLowerCase().includes('capability')
   ) || [];
 
   if (featureClaims.length > 0) {
@@ -132,7 +130,8 @@ export async function buildCompareTable(runId: string): Promise<CompareRow[]> {
   const integrationClaims = claims?.filter(claim =>
     claim.text.toLowerCase().includes('integration') ||
     claim.text.toLowerCase().includes('api') ||
-    claim.text.toLowerCase().includes('connect')
+    claim.text.toLowerCase().includes('connect') ||
+    claim.text.toLowerCase().includes('webhook')
   ) || [];
 
   if (integrationClaims.length > 0) {
@@ -155,7 +154,8 @@ export async function buildCompareTable(runId: string): Promise<CompareRow[]> {
   const limitsClaims = claims?.filter(claim =>
     claim.text.toLowerCase().includes('limit') ||
     claim.text.toLowerCase().includes('quota') ||
-    claim.text.toLowerCase().includes('usage')
+    claim.text.toLowerCase().includes('usage') ||
+    claim.text.toLowerCase().includes('capacity')
   ) || [];
 
   if (limitsClaims.length > 0) {
@@ -178,7 +178,8 @@ export async function buildCompareTable(runId: string): Promise<CompareRow[]> {
   const reportingClaims = claims?.filter(claim =>
     claim.text.toLowerCase().includes('report') ||
     claim.text.toLowerCase().includes('analytics') ||
-    claim.text.toLowerCase().includes('dashboard')
+    claim.text.toLowerCase().includes('dashboard') ||
+    claim.text.toLowerCase().includes('insight')
   ) || [];
 
   if (reportingClaims.length > 0) {
@@ -201,7 +202,8 @@ export async function buildCompareTable(runId: string): Promise<CompareRow[]> {
   const securityClaims = claims?.filter(claim =>
     claim.text.toLowerCase().includes('security') ||
     claim.text.toLowerCase().includes('compliance') ||
-    claim.text.toLowerCase().includes('soc')
+    claim.text.toLowerCase().includes('soc') ||
+    claim.text.toLowerCase().includes('encryption')
   ) || [];
 
   if (securityClaims.length > 0) {
@@ -249,113 +251,4 @@ export async function buildCompareTable(runId: string): Promise<CompareRow[]> {
   }
 
   return compareRows.slice(0, 6); // Return up to 6 rows
-}
-
-function extractCompetitorFromQuery(queryText: string): string {
-  // Simple pattern matching to extract competitor name
-  const patterns = [
-    /vs\s+([A-Za-z\s]+)/i,
-    /versus\s+([A-Za-z\s]+)/i,
-    /against\s+([A-Za-z\s]+)/i,
-    /compare.*?with\s+([A-Za-z\s]+)/i
-  ];
-
-  for (const pattern of patterns) {
-    const match = queryText.match(pattern);
-    if (match) {
-      return match[1].trim();
-    }
-  }
-
-  // Fallback: try to extract from common competitor names
-  const commonCompetitors = ['Salesforce', 'HubSpot', 'Zendesk', 'Freshdesk', 'Intercom', 'Drift', 'Pipedrive', 'Klue', 'Crayon'];
-  for (const competitor of commonCompetitors) {
-    if (queryText.toLowerCase().includes(competitor.toLowerCase())) {
-      return competitor;
-    }
-  }
-
-  return 'Competitor';
-}
-
-function getDemoCompareData(): CompareRow[] {
-  return [
-    {
-      metric: 'Pricing',
-      you: 'Competitive pricing with flexible plans starting at $29/month',
-      competitor: 'Higher pricing with limited flexibility, starting at $45/month',
-      citations: [
-        {
-          id: 'demo-1',
-          url: 'https://example.com/pricing',
-          quote: 'Our pricing is 35% lower than competitors while offering more features'
-        },
-        {
-          id: 'demo-2',
-          url: 'https://example.com/market',
-          quote: 'Industry average pricing is $50/month for similar features'
-        }
-      ]
-    },
-    {
-      metric: 'Features & Plans',
-      you: 'Comprehensive feature set with unlimited users and advanced analytics',
-      competitor: 'Limited features with user restrictions and basic reporting',
-      citations: [
-        {
-          id: 'demo-3',
-          url: 'https://example.com/features',
-          quote: 'We offer 50+ features compared to competitors\' 25 features'
-        }
-      ]
-    },
-    {
-      metric: 'Integrations',
-      you: 'Extensive API and 200+ third-party integrations including Salesforce, HubSpot',
-      competitor: 'Limited integrations with only 50+ connections available',
-      citations: [
-        {
-          id: 'demo-4',
-          url: 'https://example.com/integrations',
-          quote: 'Our platform supports 4x more integrations than leading competitors'
-        }
-      ]
-    },
-    {
-      metric: 'Usage Limits',
-      you: 'Generous limits with unlimited API calls and scalable options',
-      competitor: 'Restrictive limits with API call caps and additional charges',
-      citations: [
-        {
-          id: 'demo-5',
-          url: 'https://example.com/limits',
-          quote: 'No API call limits vs competitors\' 10,000 call monthly limit'
-        }
-      ]
-    },
-    {
-      metric: 'Reporting & Analytics',
-      you: 'Advanced analytics with custom dashboards and real-time insights',
-      competitor: 'Basic reporting with limited customization options',
-      citations: [
-        {
-          id: 'demo-6',
-          url: 'https://example.com/analytics',
-          quote: 'Real-time analytics with 15+ chart types vs basic reports'
-        }
-      ]
-    },
-    {
-      metric: 'Security',
-      you: 'Enterprise-grade security with SOC 2 compliance and SSO',
-      competitor: 'Standard security measures with basic authentication',
-      citations: [
-        {
-          id: 'demo-7',
-          url: 'https://example.com/security',
-          quote: 'SOC 2 Type II certified with enterprise SSO support'
-        }
-      ]
-    }
-  ];
 }

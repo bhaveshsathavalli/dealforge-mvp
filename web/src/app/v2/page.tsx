@@ -5,7 +5,6 @@ import { Card } from '@/components/ui/Card';
 export default function V2IndexPage() {
   const links = [
     { href: '/v2/results/demo', label: 'Results Demo', description: 'View research results with citations' },
-    { href: '/v2/compare/demo', label: 'Compare Demo', description: 'Compare competitors side by side' },
     { href: '/v2/battlecards/demo', label: 'Battlecards Demo', description: 'Create and manage battlecards' },
     { href: '/v2/history', label: 'History', description: 'View past research runs' },
     { href: '/v2/settings', label: 'Settings', description: 'Configure your preferences' },

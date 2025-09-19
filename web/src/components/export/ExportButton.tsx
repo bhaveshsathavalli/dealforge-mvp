@@ -1,59 +1,47 @@
 'use client';
+import React from 'react';
 
-import { Download } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+type Row = { 
+  metric: string; 
+  you: string; 
+  competitor: string; 
+  citations: { url: string }[] 
+};
 
-interface Citation {
-  url: string;
-}
-
-interface CompareRow {
-  metric: string;
-  you: string;
-  competitor: string;
-  citations: Citation[];
-}
-
-interface ExportButtonProps {
-  rows: CompareRow[];
-  filename?: string;
-}
-
-export function ExportButton({ rows, filename = 'compare_export.csv' }: ExportButtonProps) {
-  const handleExport = () => {
-    // Build CSV content
-    const headers = ['Metric', 'You', 'Competitor', 'Citations'];
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => [
-        `"${row.metric}"`,
-        `"${row.you}"`,
-        `"${row.competitor}"`,
-        `"${row.citations.map(c => c.url).join('; ')}"`
-      ].join(','))
-    ].join('\n');
-
-    // Create and trigger download
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
+export default function ExportButton({ 
+  rows, 
+  filename = 'compare_export.csv' 
+}: { 
+  rows: Row[]; 
+  filename?: string 
+}) {
+  function toCSV() {
+    const header = ['Metric', 'You', 'Competitor', 'Citations'];
+    const lines = rows.map(r => {
+      const cites = (r.citations || []).map(c => c.url).join(' ');
+      const cells = [r.metric, r.you, r.competitor, cites].map(v => 
+        `"${String(v).replace(/"/g, '""')}"`
+      );
+      return cells.join(',');
+    });
+    const csv = [header.join(','), ...lines].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    
+    // Fallback if no file-saver
     const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', filename);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
+    const a = document.createElement('a'); 
+    a.href = url; 
+    a.download = filename; 
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
 
   return (
-    <Button
-      variant="ghost"
-      size="sm"
-      onClick={handleExport}
-      className="flex items-center gap-2 border border-[var(--border)] hover:bg-[var(--surface-alt)]"
+    <button 
+      onClick={toCSV} 
+      className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1 text-sm hover:bg-[var(--surface-alt)] text-[var(--text)]"
     >
-      <Download className="h-4 w-4" />
       Export
-    </Button>
+    </button>
   );
 }
