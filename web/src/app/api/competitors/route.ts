@@ -1,119 +1,114 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { auth } from '@clerk/nextjs/server';
+import { supabaseAdmin } from '@/server/supabaseAdmin';
 
 export async function GET() {
-  console.log('Competitors API: GET /api/competitors called');
-  
   try {
-    const supabase = await createClient();
-
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (userError || !user) {
-      console.log('Competitors API: User not authenticated');
+    const { userId, orgId } = await auth();
+    
+    if (!userId || !orgId) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
 
-    console.log('Competitors API: User authenticated:', user.id);
-
-    // Get user's organization
-    const { data: membership, error: membershipError } = await supabase
-      .from('org_members')
-      .select('org_id')
-      .eq('user_id', user.id)
+    // Get organization data using service role
+    const { data: org, error: orgError } = await supabaseAdmin
+      .from("orgs")
+      .select("id")
+      .eq('clerk_org_id', orgId)
       .single();
-
-    if (membershipError || !membership) {
-      console.log('Competitors API: No organization membership found');
-      return NextResponse.json({ error: 'No organization membership' }, { status: 403 });
+      
+    if (orgError || !org) {
+      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
     }
 
     // Get competitors for the organization
-    const { data: competitors, error: competitorsError } = await supabase
+    const { data: competitors, error: competitorsError } = await supabaseAdmin
       .from('competitors')
-      .select('id, name, aliases')
-      .eq('org_id', membership.org_id)
-      .order('name');
+      .select('id, name, website, slug, active, aliases')
+      .eq('org_id', org.id)
+      .eq('active', true)
+      .order('created_at', { ascending: false });
 
     if (competitorsError) {
-      console.error('Competitors API: Error fetching competitors:', competitorsError);
-      return NextResponse.json({ error: 'Failed to fetch competitors' }, { status: 500 });
+      return NextResponse.json({ error: competitorsError.message }, { status: 500 });
     }
 
-    console.log('Competitors API: Returning', competitors?.length || 0, 'competitors');
     return NextResponse.json({ competitors: competitors || [] });
 
   } catch (error: unknown) {
-    console.error('Competitors API: Error:', error);
-    return NextResponse.json({ 
-      error: 'Internal Server Error', 
-      details: error instanceof Error ? error.message : 'Unknown error' 
+    return NextResponse.json({
+      error: 'Internal server error',
+      details: error instanceof Error ? error.message : 'Unknown error'
     }, { status: 500 });
   }
 }
 
 export async function POST(req: Request) {
-  console.log('Competitors API: POST /api/competitors called');
-  
   try {
-    const supabase = await createClient();
-
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (userError || !user) {
-      console.log('Competitors API: User not authenticated');
+    const { userId, orgId } = await auth();
+    
+    if (!userId || !orgId) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
 
-    console.log('Competitors API: User authenticated:', user.id);
-
-    // Get user's organization
-    const { data: membership, error: membershipError } = await supabase
-      .from('org_members')
-      .select('org_id')
-      .eq('user_id', user.id)
-      .single();
-
-    if (membershipError || !membership) {
-      console.log('Competitors API: No organization membership found');
-      return NextResponse.json({ error: 'No organization membership' }, { status: 403 });
+    // Handle both JSON and FormData requests
+    let name: string, website: string | undefined, aliases: string[] = [];
+    
+    const contentType = req.headers.get('content-type');
+    if (contentType?.includes('application/json')) {
+      const body = await req.json();
+      name = String(body.name ?? '').trim();
+      website = body.website ? String(body.website).trim() : undefined;
+      aliases = Array.isArray(body.aliases) ? body.aliases : [];
+    } else {
+      const formData = await req.formData();
+      name = String(formData.get('name') ?? '').trim();
+      website = String(formData.get('website') ?? '').trim() || undefined;
+      const aliasesString = String(formData.get('aliases') ?? '').trim();
+      aliases = aliasesString ? aliasesString.split(',').map(a => a.trim()).filter(a => a) : [];
     }
 
-    // Parse request body
-    const body = await req.json();
-    const { name, aliases } = body;
-
-    if (!name || !name.trim()) {
+    if (!name) {
       return NextResponse.json({ error: 'Competitor name is required' }, { status: 400 });
     }
 
-    console.log('Competitors API: Creating competitor:', { name, aliases });
+    // Get organization data using service role
+    const { data: org, error: orgError } = await supabaseAdmin
+      .from("orgs")
+      .select("id")
+      .eq('clerk_org_id', orgId)
+      .single();
+      
+    if (orgError || !org) {
+      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+    }
 
     // Insert new competitor
-    const { data: newCompetitor, error: insertError } = await supabase
+    const { data: newCompetitor, error: insertError } = await supabaseAdmin
       .from('competitors')
       .insert({
-        org_id: membership.org_id,
-        name: name.trim(),
-        aliases: aliases ? aliases.split(',').map((a: string) => a.trim()).filter((a: string) => a) : []
+        org_id: org.id,
+        name: name,
+        website: website,
+        aliases: aliases,
+        active: true
       })
-      .select('id, name, aliases')
+      .select('id, name, website, slug, active, aliases')
       .single();
 
     if (insertError) {
-      console.error('Competitors API: Failed to create competitor:', insertError);
-      return NextResponse.json({ error: 'Failed to create competitor' }, { status: 500 });
+      return NextResponse.json({ error: insertError.message }, { status: 500 });
     }
 
-    console.log('Competitors API: Created competitor:', newCompetitor.id);
     return NextResponse.json({ 
       success: true, 
-      competitor: newCompetitor 
+      competitor: newCompetitor
     });
 
   } catch (error: unknown) {
-    console.error('Competitors API: Error:', error);
-    return NextResponse.json({ 
-      error: 'Internal Server Error', 
-      details: error instanceof Error ? error.message : 'Unknown error' 
+    return NextResponse.json({
+      error: 'Internal server error',
+      details: error instanceof Error ? error.message : 'Unknown error'
     }, { status: 500 });
   }
 }

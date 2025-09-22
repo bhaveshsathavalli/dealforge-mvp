@@ -2,6 +2,7 @@ import { auth } from '@clerk/nextjs/server';
 import { supabaseAdmin } from '@/server/supabaseAdmin';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import StartRunModal from '@/components/StartRunModal';
 
 export default async function AppPage() {
   const { userId, orgId } = await auth();
@@ -29,12 +30,35 @@ export default async function AppPage() {
     .eq('clerk_user_id', userId)
     .single();
 
+  // Get organization data and competitors for the modal
+  const { data: orgData } = await supabaseAdmin
+    .from('orgs')
+    .select('id, product_name')
+    .eq('clerk_org_id', orgId)
+    .single();
+
+  const { data: competitors } = await supabaseAdmin
+    .from('competitors')
+    .select('id, name')
+    .eq('org_id', orgData?.id || '')
+    .eq('active', true)
+    .order('created_at', { ascending: false });
+
   const isAdmin = membership?.role === 'admin';
   const needsOnboarding = isAdmin && !org?.onboarding_completed;
 
   return (
     <div className="max-w-6xl mx-auto p-6">
-      <h1 className="text-3xl font-semibold mb-6">Dashboard</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-3xl font-semibold">Dashboard</h1>
+        {competitors && competitors.length > 0 && orgData?.product_name && (
+          <StartRunModal 
+            competitors={competitors}
+            triggerText="Start Compare Run"
+            triggerClassName="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg"
+          />
+        )}
+      </div>
       
       {needsOnboarding && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">

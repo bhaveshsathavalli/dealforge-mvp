@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { runCompareFactsPipeline } from "@/app/compare/actions";
 
 export default function StartRunForm() {
   const [query, setQuery] = useState("");
@@ -11,28 +12,38 @@ export default function StartRunForm() {
     e.preventDefault();
     if (!query.trim()) return;
     setBusy(true);
+    
     try {
-      const res = await fetch("/api/runs/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query }),
+      // Parse the query to extract vendor names
+      // Expected format: "VendorA vs VendorB" or "VendorA vs VendorB pricing"
+      const match = query.match(/^(.+?)\s+vs\s+(.+?)(?:\s+.+)?$/i);
+      if (!match) {
+        alert("Please use format: 'VendorA vs VendorB'");
+        setBusy(false);
+        return;
+      }
+      
+      const youName = match[1].trim();
+      const compName = match[2].trim();
+      
+      const result = await runCompareFactsPipeline({
+        youName,
+        compName
       });
       
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        if (errorData.error === "database_not_setup") {
-          alert("Database not set up yet. Please configure Supabase tables first.");
+      if (!result?.ok) {
+        if (result?.reason === "cooldown") {
+          alert("Please wait before starting another comparison (15 minute cooldown)");
         } else {
-          alert(`Failed to start run: ${errorData.message || `HTTP ${res.status}`}`);
+          alert("Failed to start comparison");
         }
         setBusy(false);
         return;
       }
       
-      const json = await res.json();
-      router.push(`/app/results/${json.runId}`);
+      router.push(`/app/compare/${result.runId}`);
     } catch (err) {
-      alert("Failed to start run. Check server logs and SERPAPI_KEY.");
+      alert("Failed to start comparison. Check server logs.");
       setBusy(false);
     }
   }

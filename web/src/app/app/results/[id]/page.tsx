@@ -1,16 +1,19 @@
 import { supabaseServer } from "@/lib/supabaseServer";
 import { requireOrg } from "@/lib/authz";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
 
 export const dynamic = "force-dynamic";
 
-export default async function ResultPage({ params }: { params: { id: string } }) {
+export default async function ResultPage({ params }: { params: Promise<{ id: string }> }) {
   const { orgId } = await requireOrg();
   const sb = supabaseServer();
+  const { id } = await params;
 
   const { data: run, error: runErr } = await sb
     .from("query_runs")
     .select("id, status, clerk_org_id, query_text, created_at")
-    .eq("id", params.id)
+    .eq("id", id)
     .single();
 
   if (runErr) return <div className="p-8 text-red-600">Error: {runErr.message}</div>;
@@ -36,9 +39,18 @@ export default async function ResultPage({ params }: { params: { id: string } })
 
   return (
     <main className="p-8">
-      <h1 className="text-2xl font-semibold mb-2">Results</h1>
-      <p className="text-muted-foreground">Query: {run.query_text}</p>
-      <ul className="mt-6 space-y-2">
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <h1 className="text-2xl font-semibold mb-2">Results</h1>
+          <p className="text-muted-foreground">Query: {run.query_text}</p>
+        </div>
+        <Link href={`/compare/${id}`}>
+          <Button>
+            Open Compare
+          </Button>
+        </Link>
+      </div>
+      <ul className="space-y-2">
         {hits?.map((h: any) => (
           <li key={h.id} className="border border-border rounded p-3 bg-card">
             <div className="font-medium">{h.title || h.source_url}</div>
