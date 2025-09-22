@@ -3,9 +3,11 @@ import { getOrgUuidFromClerk } from "@/lib/org/ids";
 import { runCompareFactsPipeline } from "@/app/compare/actions";
 import { redirect } from "next/navigation";
 import { isFactsPipelineEnabled } from "@/lib/flags";
+import { ensureDbOrg } from "@/server/ensureOrg";
 
 export default async function SmokeTestPage() {
   const { orgUuid, userId } = await getOrgUuidFromClerk();
+  const { dbOrgId, clerkOrgId } = await ensureDbOrg();
   const sb = await createClient();
   
   // Get last 5 compare runs for this org
@@ -72,6 +74,15 @@ export default async function SmokeTestPage() {
             : 'Facts pipeline feature is disabled. Some functionality may not work.'
           }
         </p>
+      </div>
+      
+      {/* Org Mapping Sanity Widget */}
+      <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6">
+        <h2 className="text-lg font-semibold mb-2">Org Mapping Sanity Check</h2>
+        <div className="space-y-2 text-sm">
+          <div>Clerk Org ID: <code className="bg-gray-100 px-1 rounded">{clerkOrgId}</code></div>
+          <div>DB Org UUID: <code className="bg-gray-100 px-1 rounded">{dbOrgId}</code></div>
+        </div>
       </div>
       
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
