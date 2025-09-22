@@ -1,40 +1,47 @@
 import { createClient } from "@/lib/supabase/server";
 import { answerScore } from "./scores";
+import { withOrgScope } from "@/lib/org";
 
 type Citation = { url: string; title?: string; source_id?: string };
 
 export async function saveSourceAndFacts(vendorId: string, payload: { source: any; facts: any[] }) {
-  const sb = await createClient();
-  
-  const { data: src } = await sb
-    .from("sources")
-    .insert({
-      vendor_id: vendorId,
-      metric: payload.source.metric,
-      url: payload.source.url,
-      title: payload.source.title,
-      body: payload.source.body,
-      body_hash: payload.source.body_hash,
-      first_party: payload.source.first_party,
-      fetched_at: new Date().toISOString(),
-      source_score: payload.source.source_score
-    })
-    .select("id")
-    .single();
+  return withOrgScope(async (orgId) => {
+    const sb = await createClient();
     
-  if (payload.facts?.length) {
-    const facts = payload.facts.map(f => ({
-      vendor_id: vendorId,
-      metric: f.metric,
-      key: f.key,
-      value: f.value,
-      text_summary: f.text_summary,
-      citations: (f.citations ?? []).map((c: Citation) => ({ ...c, source_id: src?.id })),
-      fact_score: f.confidence ?? 0.7
-    }));
+    const { data: src } = await sb
+      .from("sources")
+      .insert({
+        org_id: orgId,
+        vendor_id: vendorId,
+        metric: payload.source.metric,
+        url: payload.source.url,
+        title: payload.source.title,
+        body: payload.source.body,
+        body_hash: payload.source.body_hash,
+        first_party: payload.source.first_party,
+        fetched_at: new Date().toISOString(),
+        source_score: payload.source.source_score
+      })
+      .select("id")
+      .single();
+      
+    if (payload.facts?.length) {
+      const facts = payload.facts.map(f => ({
+        org_id: orgId,
+        vendor_id: vendorId,
+        metric: f.metric,
+        key: f.key,
+        value: f.value,
+        text_summary: f.text_summary,
+        citations: (f.citations ?? []).map((c: Citation) => ({ ...c, source_id: src?.id })),
+        fact_score: f.confidence ?? 0.7
+      }));
+      
+      await sb.from("facts").insert(facts);
+    }
     
-    await sb.from("facts").insert(facts);
-  }
+    return src?.id;
+  });
 }
 
 export function composeCompareCell(facts: any[], metric: string) {
