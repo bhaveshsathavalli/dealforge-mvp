@@ -1,7 +1,12 @@
+// web/src/lib/facts/http.ts
 /**
- * HTTP Fetcher for Facts Pipeline
- * Handles ETag/Last-Modified caching, retries, and normalization
+ * HTTP fetcher for the facts pipeline.
+ * - Conditional requests via ETag/Last-Modified
+ * - Auto retry + cache-bust if we get 304 or empty bodies
+ * - Friendly helpers used elsewhere (directFetch, normalizeHtmlOrJson, hashBody)
  */
+
+import crypto from "crypto";
 
 export interface CacheInfo {
   etag?: string;
@@ -19,257 +24,269 @@ export interface FetchOptions {
   timeout?: number;
   retries?: number;
   userAgent?: string;
+  forceFresh?: boolean;          // always add a cache-busting param
+  returnPartialOn304?: boolean;  // caller will deal with cached body
 }
 
 const DEFAULT_OPTIONS: Required<FetchOptions> = {
-  timeout: 12000, // 12 seconds
-  retries: 3,
-  userAgent: 'GEOFactsBot/1.0'
+  timeout: 12000,
+  retries: 2,
+  userAgent:
+    'GEOFactsBot/1.0 (+https://example.invalid) FactsFetcher/Node',
+  forceFresh: false,
+  returnPartialOn304: false,
 };
 
-/**
- * Normalize URL by removing fragments and unifying trailing slash
- */
+/* ---------------------------- small utilities ---------------------------- */
+
+export function hashBody(s: string): string {
+  return crypto.createHash("sha256").update(s).digest("hex");
+}
+
+/** Normalize URL by removing fragments and coalescing root slashes */
 function normalizeUrl(url: string): string {
   try {
-    const urlObj = new URL(url);
-    // Remove fragment (#...)
-    urlObj.hash = '';
-    
-    // Unify trailing slash for root paths
-    if (urlObj.pathname === '/' || urlObj.pathname === '') {
-      urlObj.pathname = '/';
-    }
-    
-    return urlObj.toString();
-  } catch (error) {
-    // If URL parsing fails, return original
+    const u = new URL(url);
+    u.hash = "";
+    if (!u.pathname) u.pathname = "/";
+    return u.toString();
+  } catch {
     return url;
   }
 }
 
-/**
- * Sleep for specified milliseconds
- */
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+/** Sleep ms */
+function sleep(ms: number) {
+  return new Promise<void>((r) => setTimeout(r, ms));
 }
 
-/**
- * Fetch a web page with caching, retries, and proper error handling
- */
-export async function fetchPage(
-  url: string, 
-  prevCache?: CacheInfo,
-  options: FetchOptions = {}
-): Promise<FetchResult> {
-  const opts = { ...DEFAULT_OPTIONS, ...options };
-  const normalizedUrl = normalizeUrl(url);
-  
-  let lastError: Error | null = null;
-  
-  for (let attempt = 0; attempt <= opts.retries; attempt++) {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), opts.timeout);
-      
-      const headers: Record<string, string> = {
-        'User-Agent': opts.userAgent,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1'
-      };
-      
-      // Add conditional headers if we have cache info
-      if (prevCache?.etag) {
-        headers['If-None-Match'] = prevCache.etag;
-      }
-      if (prevCache?.lastModified) {
-        headers['If-Modified-Since'] = prevCache.lastModified;
-      }
-      
-      const response = await fetch(normalizedUrl, {
-        method: 'GET',
-        headers,
-        signal: controller.signal,
-        redirect: 'follow'
-      });
-      
-      clearTimeout(timeoutId);
-      
-      // Handle 304 Not Modified
-      if (response.status === 304) {
-        return {
-          html: '',
-          status: 304,
-          cache: prevCache || {},
-          fetchedAt: new Date().toISOString()
-        };
-      }
-      
-      // Extract cache headers
-      const cache: CacheInfo = {};
-      const etag = response.headers.get('etag');
-      const lastModified = response.headers.get('last-modified');
-      
-      if (etag) {
-        cache.etag = etag;
-      }
-      if (lastModified) {
-        cache.lastModified = lastModified;
-      }
-      
-      // Get response text
-      let html = '';
-      if (response.ok) {
-        html = await response.text();
-      }
-      
-      return {
-        html,
-        status: response.status,
-        cache,
-        fetchedAt: new Date().toISOString()
-      };
-      
-    } catch (error) {
-      lastError = error as Error;
-      
-      // Don't retry on certain errors
-      if (error instanceof Error) {
-        if (error.name === 'AbortError') {
-          // Timeout - retry with backoff
-          if (attempt < opts.retries) {
-            const backoffMs = Math.min(1000 * Math.pow(2, attempt), 5000);
-            await sleep(backoffMs);
-            continue;
-          }
-        } else if (error.message.includes('fetch')) {
-          // Network error - retry with backoff
-          if (attempt < opts.retries) {
-            const backoffMs = Math.min(1000 * Math.pow(2, attempt), 5000);
-            await sleep(backoffMs);
-            continue;
-          }
-        }
-      }
-      
-      // If we're on the last attempt or it's a non-retryable error, throw
-      if (attempt === opts.retries) {
-        throw lastError;
-      }
-    }
+/** Append/replace a query param safely */
+export function withParam(url: string, key: string, value: string): string {
+  try {
+    const u = new URL(url);
+    u.searchParams.set(key, value);
+    return u.toString();
+  } catch {
+    return url;
   }
-  
-  throw lastError || new Error('Unknown error occurred');
 }
 
-/**
- * Check if a URL is likely to be a valid web page
- */
+/** Some fetch wrappers like to be sure it *is* a web URL */
 export function isValidUrl(url: string): boolean {
   try {
-    const urlObj = new URL(url);
-    return ['http:', 'https:'].includes(urlObj.protocol);
+    const u = new URL(url);
+    return u.protocol === "http:" || u.protocol === "https:";
   } catch {
     return false;
   }
 }
 
-/**
- * Extract domain from URL
- */
 export function extractDomain(url: string): string | null {
   try {
-    const urlObj = new URL(url);
-    return urlObj.hostname;
+    return new URL(url).hostname;
   } catch {
     return null;
   }
 }
 
-/**
- * Check if two URLs are from the same domain
- */
-export function isSameDomain(url1: string, url2: string): boolean {
-  const domain1 = extractDomain(url1);
-  const domain2 = extractDomain(url2);
-  return domain1 !== null && domain1 === domain2;
+export function isSameDomain(a: string, b: string): boolean {
+  const da = extractDomain(a);
+  const db = extractDomain(b);
+  return !!da && da === db;
 }
 
-/**
- * Generate a cache key for a URL
- */
+/** Simple stable cache key */
 export function getCacheKey(url: string): string {
-  const normalizedUrl = normalizeUrl(url);
-  // Simple hash function for cache key
-  let hash = 0;
-  for (let i = 0; i < normalizedUrl.length; i++) {
-    const char = normalizedUrl.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32-bit integer
+  const n = normalizeUrl(url);
+  let h = 0;
+  for (let i = 0; i < n.length; i++) {
+    h = ((h << 5) - h) + n.charCodeAt(i);
+    h |= 0;
   }
-  return `fetch_${Math.abs(hash).toString(36)}`;
+  return `fetch_${Math.abs(h).toString(36)}`;
 }
 
-/**
- * Parse HTML content to extract basic metadata
- */
+/** Minimal metadata yank (best-effort) */
 export function extractPageMetadata(html: string): {
-  title?: string;
-  description?: string;
-  language?: string;
+  title?: string; description?: string; language?: string;
 } {
-  const metadata: { title?: string; description?: string; language?: string } = {};
-  
+  const m: { title?: string; description?: string; language?: string } = {};
   try {
-    // Extract title
-    const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
-    if (titleMatch) {
-      metadata.title = titleMatch[1].trim();
-    }
-    
-    // Extract description
-    const descMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']*)["'][^>]*>/i);
-    if (descMatch) {
-      metadata.description = descMatch[1].trim();
-    }
-    
-    // Extract language
-    const langMatch = html.match(/<html[^>]*lang=["']([^"']*)["'][^>]*>/i);
-    if (langMatch) {
-      metadata.language = langMatch[1].trim();
-    }
-  } catch (error) {
-    // Ignore parsing errors
+    const t = html.match(/<title[^>]*>([^<]*)<\/title>/i);
+    if (t) m.title = t[1].trim();
+    const d = html.match(
+      /<meta[^>]*name=["']description["'][^>]*content=["']([^"']*)["'][^>]*>/i
+    );
+    if (d) m.description = d[1].trim();
+    const l = html.match(/<html[^>]*lang=["']([^"']*)["'][^>]*>/i);
+    if (l) m.language = l[1].trim();
+  } catch {}
+  return m;
+}
+
+/** Compare server cache headers */
+export function hasPageChanged(current: CacheInfo, previous?: CacheInfo): boolean {
+  if (!previous) return true;
+  if (current.etag && previous.etag) return current.etag !== previous.etag;
+  if (current.lastModified && previous.lastModified) {
+    return current.lastModified !== previous.lastModified;
   }
-  
-  return metadata;
+  return true;
+}
+
+/** HTML/JSON normalizer (used in some collectors) */
+export function normalizeHtmlOrJson(body: string): string {
+  // For JSON-ish responses, wrap as <pre> to keep downstream cheerio safe.
+  const trimmed = body.trim();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    return `<pre data-kind="json">${escapeHtml(trimmed)}</pre>`;
+  }
+  return body;
+}
+
+function escapeHtml(s: string) {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/* -------------------------------- fetchers -------------------------------- */
+
+/**
+ * Main fetcher with smart 304/empty-body fallback.
+ * If we ever see status 304 or an empty body, we retry *once* with:
+ *  - cache-busting param
+ *  - no conditional headers
+ *  - Cache-Control: no-cache
+ */
+export async function fetchPage(
+  url: string,
+  prevCache?: CacheInfo,
+  options: FetchOptions = {}
+): Promise<FetchResult> {
+  const opts = { ...DEFAULT_OPTIONS, ...options };
+  let target = normalizeUrl(url);
+
+  // First pass: maybe force-fresh (explicit) or normal
+  if (opts.forceFresh) {
+    target = withParam(target, "__t", String(Date.now()));
+  }
+
+  // Try the request; if it returns 304/empty, fall back with cache-bust once
+  const first = await doFetchOnce(target, prevCache, opts, /*allowConditionals*/ !opts.forceFresh);
+
+  if (
+    first.status === 304 ||
+    (first.status >= 200 && first.status < 300 && (!first.html || first.html.length < 20))
+  ) {
+    // Retry once with hard no-cache + cache-bust and NO conditionals
+    const busted = withParam(target, "__b", `${Date.now()}${Math.random()}`);
+    const second = await doFetchOnce(busted, undefined /* drop conditionals */, {
+      ...opts,
+      forceFresh: true,
+    }, /*allowConditionals*/ false);
+
+    // If second also came back empty, just return second; caller can decide.
+    if (second.html && second.html.length >= 20) return second;
+    return second.status === 304 && opts.returnPartialOn304 ? second : second;
+  }
+
+  return first;
+}
+
+async function doFetchOnce(
+  url: string,
+  prevCache: CacheInfo | undefined,
+  opts: Required<FetchOptions>,
+  allowConditionals: boolean
+): Promise<FetchResult> {
+  let lastErr: any = null;
+
+  for (let attempt = 0; attempt <= opts.retries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const to = setTimeout(() => controller.abort(), opts.timeout);
+
+      const headers: Record<string, string> = {
+        "User-Agent": opts.userAgent,
+        "Accept":
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.6",
+        // Let node-fetch handle decompression; don't force content-encoding
+        "Cache-Control": opts.forceFresh ? "no-cache" : "max-age=0",
+        "Pragma": opts.forceFresh ? "no-cache" : "no-cache",
+        "Upgrade-Insecure-Requests": "1",
+      };
+
+      if (allowConditionals && prevCache) {
+        if (prevCache.etag) headers["If-None-Match"] = prevCache.etag;
+        if (prevCache.lastModified) headers["If-Modified-Since"] = prevCache.lastModified;
+      }
+
+      const resp = await fetch(url, {
+        method: "GET",
+        headers,
+        redirect: "follow",
+        signal: controller.signal,
+      });
+
+      clearTimeout(to);
+
+      // Build cache info
+      const cache: CacheInfo = {};
+      const etag = resp.headers.get("etag");
+      const lm = resp.headers.get("last-modified");
+      if (etag) cache.etag = etag;
+      if (lm) cache.lastModified = lm;
+
+      let html = "";
+      if (resp.status !== 304) {
+        // node >=18 decodes gzip/deflate automatically
+        html = await resp.text();
+      }
+
+      return {
+        html,
+        status: resp.status,
+        cache,
+        fetchedAt: new Date().toISOString(),
+      };
+    } catch (e: any) {
+      lastErr = e;
+      // Backoff on abort/network errors
+      const backoff = Math.min(1000 * Math.pow(2, attempt), 5000);
+      if (attempt < opts.retries) {
+        await sleep(backoff);
+        continue;
+      }
+      throw lastErr;
+    }
+  }
+
+  // Should not reach here
+  throw lastErr ?? new Error("Unknown fetch error");
 }
 
 /**
- * Check if response indicates the page has changed
+ * Convenience: fire a single GET and return {status, body, fetchedAt}.
+ * No conditionals, always bust cache once to avoid stale 304s.
  */
-export function hasPageChanged(
-  currentCache: CacheInfo, 
-  previousCache?: CacheInfo
-): boolean {
-  if (!previousCache) {
-    return true; // No previous cache, assume changed
-  }
-  
-  // Check ETag
-  if (currentCache.etag && previousCache.etag) {
-    return currentCache.etag !== previousCache.etag;
-  }
-  
-  // Check Last-Modified
-  if (currentCache.lastModified && previousCache.lastModified) {
-    return currentCache.lastModified !== previousCache.lastModified;
-  }
-  
-  // If we can't determine, assume changed
-  return true;
+export async function directFetch(
+  url: string,
+  opts: Partial<Pick<FetchOptions, "timeout" | "userAgent">> = {}
+): Promise<{ status: number; body: string; fetchedAt: string; headers: Record<string, string> }> {
+  const r = await fetchPage(url, undefined, {
+    ...opts,
+    retries: 0,
+    forceFresh: true,
+  } as FetchOptions);
+
+  // Normalize to the old shape some scripts used
+  return {
+    status: r.status,
+    body: r.html,
+    fetchedAt: r.fetchedAt,
+    headers: {}, // keep simple; extend if you need raw headers
+  };
 }

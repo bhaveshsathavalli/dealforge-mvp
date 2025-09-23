@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { createClient } from "@supabase/supabase-js";
-import { auth, clerkClient, Organization } from "@clerk/nextjs";
+import { auth, clerkClient, Organization } from "@clerk/nextjs/server";
 
 type OrgRow = { id: string; name: string | null; clerk_org_id: string | null; slug: string | null };
 

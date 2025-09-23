@@ -12,7 +12,7 @@ export async function collectSecurity(domain: string) {
     if (res.status !== 200 || !res.body) return null;
     
     const norm = normalizeHtmlOrJson(res.body);
-    const $ = cheerio.load(norm);
+    const $: cheerio.CheerioAPI = cheerio.load(norm);
     const text = $("body").text();
     
     const securityItems = [];

@@ -34,3 +34,19 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+
+## Headless fallback (optional)
+
+Some pricing pages render content client-side. You can enable an optional, guarded headless renderer that retries pages with Chromium **only** when:
+- The URL matches the requested metric (e.g., `/pricing`),
+- The initial classifier score is < 0.70,
+- The page text includes pricing-like tokens (e.g., "$", "per user", "plan").
+
+Enable locally:
+
+```bash
+cd web
+pnpm add -D playwright
+pnpm exec playwright install chromium
+export FACTS_HEADLESS_ENABLED=1   # or set in .env.local

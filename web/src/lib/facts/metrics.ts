@@ -53,7 +53,8 @@ export const METRICS: Record<MetricKey, MetricConfig> = {
       /\/platform/i,
       /\/product/i,
       /what.*we.*offer/i,
-      /our.*features/i
+      /our.*features/i,
+      /\bfeatures\b/i
     ],
     contentSignals: [
       "features",
@@ -70,7 +71,9 @@ export const METRICS: Record<MetricKey, MetricConfig> = {
       "api",
       "mobile",
       "desktop",
-      "cloud"
+      "cloud",
+      "how it works",
+      "use cases"
     ],
     requiredKeys: ["capability"],
     weight: 8
@@ -79,11 +82,14 @@ export const METRICS: Record<MetricKey, MetricConfig> = {
   integrations: {
     urlPatterns: [
       /(integrations|works with|connect)/i,
-      /\/integrations/i,
+      /\/integrations?\b/i,
       /\/connect/i,
-      /\/partners/i,
-      /\/apps/i,
+      /\/partners?\b/i,
+      /\/apps?\b/i,
       /\/marketplace/i,
+      /\/addons?\b/i,
+      /\/extensions?\b/i,
+      /\/directory/i,
       /third.*party/i,
       /api.*integrations/i
     ],
@@ -94,6 +100,9 @@ export const METRICS: Record<MetricKey, MetricConfig> = {
       "partners",
       "apps",
       "marketplace",
+      "add-on",
+      "extension",
+      "app directory",
       "api",
       "webhook",
       "sso",
@@ -150,16 +159,18 @@ export const METRICS: Record<MetricKey, MetricConfig> = {
 
   reliability: {
     urlPatterns: [
-      /(uptime|sla|incidents|availability)/i,
+      /(uptime|incidents)/i,
       /\/uptime/i,
       /\/status/i,
       /\/reliability/i,
       /\/performance/i,
       /service.*level/i,
-      /sla/i,
+      /\bsla\b/i,
       /incident/i,
       /outage/i,
-      /maintenance/i
+      /maintenance/i,
+      /availability.*report/i,
+      /system.*availability/i
     ],
     contentSignals: [
       "uptime",

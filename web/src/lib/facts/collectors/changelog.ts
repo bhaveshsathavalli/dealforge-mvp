@@ -12,7 +12,7 @@ export async function collectChangelog(domain: string) {
     if (res.status !== 200 || !res.body) return null;
     
     const norm = normalizeHtmlOrJson(res.body);
-    const $ = cheerio.load(norm);
+    const $: cheerio.CheerioAPI = cheerio.load(norm);
     const entries = $("h1,h2,h3,li").map((_, el) => $(el).text().trim()).get().filter(Boolean).slice(0, 3);
     
     const facts = entries.map((entry: string) => ({

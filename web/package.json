@@ -12,7 +12,13 @@
     "start": "next start -p 3000",
     "lint": "eslint",
     "clean-ports": "lsof -ti:3000,3001 | xargs kill -9 2>/dev/null || echo 'No processes to kill'",
-    "smoke": "tsx scripts/smoke.ts"
+    "smoke": "tsx scripts/smoke.ts",
+    "dev:classify": "tsx scripts/dev-classify-url.ts",
+    "dev:crawl": "tsx scripts/dev-crawl.ts",
+    "dev-pricing": "tsx scripts/dev-pricing.ts",
+    "dev-features": "tsx scripts/dev-features.ts",
+    "dev-integrations": "tsx scripts/dev-integrations.ts",
+    "smoke:facts": "node scripts/dev-loop.js"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.32.0",
@@ -45,6 +51,7 @@
     "concurrently": "^9.0.0",
     "eslint": "^9",
     "eslint-config-next": "15.5.2",
+    "playwright": "^1.55.0",
     "tailwindcss": "^4",
     "tsx": "^4.19.0",
     "tw-animate-css": "^1.3.8",
