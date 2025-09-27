@@ -1,28 +1,14 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { withOrgId } from "@/server/withOrg";
 import { supabaseServer } from "@/lib/supabaseServer";
 
-export async function GET() {
-  const { userId, orgId } = await auth();
-  
-  console.log("[api/runs/list] Auth check:", { userId: !!userId, orgId });
-  
-  if (!userId) {
-    console.log("[api/runs/list] No userId, returning 401");
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
-  
-  if (!orgId) {
-    console.log("[api/runs/list] No orgId, returning 400");
-    return NextResponse.json({ error: "no_org" }, { status: 400 });
-  }
-
+export const GET = withOrgId(async ({ orgId }) => {
   try {
     const sb = supabaseServer();
     const { data, error } = await sb
       .from("query_runs")
       .select("id, query_text, status, created_at, cost_cents, latency_ms")
-      .eq("clerk_org_id", orgId)
+      .eq("org_id", orgId)
       .order("created_at", { ascending: false })
       .limit(50);
 

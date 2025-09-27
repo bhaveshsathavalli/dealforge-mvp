@@ -1,0 +1,157 @@
+{
+  "generatedAt": "2025-01-27T20:00:00Z",
+  "repo": {
+    "root": "/Users/bhaveshsathavalli/ai-query-research",
+    "tree": [
+      "web/",
+      "web/src/app/",
+      "web/src/lib/",
+      "web/src/components/",
+      "web/src/server/",
+      "web/migrations/",
+      "web/supabase/",
+      "web/scripts/",
+      "web/docs/"
+    ],
+    "workspaces": ["web"]
+  },
+  "framework": {
+    "name": "Next.js",
+    "version": "15.5.2",
+    "typescript": true,
+    "node": ">=18"
+  },
+  "dependencies": [
+    {"name": "@clerk/nextjs", "version": "^6.32.0", "purpose": "authentication"},
+    {"name": "@supabase/supabase-js", "version": "^2.57.2", "purpose": "database"},
+    {"name": "@supabase/ssr", "version": "^0.7.0", "purpose": "server-side rendering"},
+    {"name": "cheerio", "version": "^1.1.2", "purpose": "HTML parsing"},
+    {"name": "openai", "version": "^5.19.1", "purpose": "LLM integration"},
+    {"name": "playwright", "version": "^1.55.0", "purpose": "headless browser"},
+    {"name": "zod", "version": "^3.25.76", "purpose": "schema validation"},
+    {"name": "next-themes", "version": "^0.4.6", "purpose": "dark mode"},
+    {"name": "lucide-react", "version": "^0.542.0", "purpose": "icons"}
+  ],
+  "scripts": [
+    {"name": "dev", "desc": "start development server on port 3000"},
+    {"name": "build", "desc": "build production bundle"},
+    {"name": "start", "desc": "run production server on port 3000"},
+    {"name": "lint", "desc": "run ESLint"},
+    {"name": "smoke", "desc": "run smoke tests"},
+    {"name": "dev:classify", "desc": "test URL classification"},
+    {"name": "dev:crawl", "desc": "test web crawling"},
+    {"name": "dev-pricing", "desc": "test pricing extraction"},
+    {"name": "dev-features", "desc": "test features extraction"},
+    {"name": "dev-integrations", "desc": "test integrations extraction"},
+    {"name": "smoke:facts", "desc": "run facts pipeline smoke test"}
+  ],
+  "routes": {
+    "pages": [
+      "/",
+      "/dashboard",
+      "/competitors", 
+      "/battlecards",
+      "/app/runs",
+      "/app/updates",
+      "/settings",
+      "/compare/[runId]",
+      "/app/compare/[runId]",
+      "/results/[id]",
+      "/onboarding",
+      "/welcome",
+      "/sign-in",
+      "/sign-up"
+    ],
+    "api": [
+      {"method": "POST", "path": "/api/runs/start", "in": "{query: string}", "out": "{runId: string, status: string}", "auth": "clerk org required"},
+      {"method": "GET", "path": "/api/runs/status/[id]", "in": "{id}", "out": "{id, status, created_at}", "auth": "clerk org required"},
+      {"method": "GET", "path": "/api/competitors", "in": "none", "out": "{competitors: array}", "auth": "clerk org required"},
+      {"method": "POST", "path": "/api/competitors", "in": "{name, website?, aliases?}", "out": "{success: boolean, competitor: object}", "auth": "clerk org required"},
+      {"method": "POST", "path": "/api/test-facts-pipeline", "in": "none", "out": "{success: boolean, message: string}", "auth": "none"},
+      {"method": "GET", "path": "/api/debug/auth", "in": "none", "out": "{userId, orgId, hasServiceKey, hasSerp}", "auth": "clerk required"},
+      {"method": "GET", "path": "/api/diag/echo", "in": "none", "out": "{ok: boolean, debug: object}", "auth": "none"}
+    ]
+  },
+  "ui": {
+    "sidebar": ["Dashboard", "Competitors", "Battlecards", "Runs", "Updates", "Settings"],
+    "componentsByPage": {
+      "dashboard": ["DashboardLayout", "StartRunForm"],
+      "compare": ["CompareTable", "AnswerScoreBadge", "CitationChip"],
+      "competitors": ["CompetitorList", "AddCompetitorForm"]
+    },
+    "theme": {"darkMode": "next-themes with system preference"}
+  },
+  "auth": {
+    "clerk": {
+      "orgReads": ["src/app/api/runs/start/route.ts", "src/lib/authz.ts"],
+      "idVsUUIDMapping": ["migrations/clerk-migration.sql", "src/server/ensureOrg.ts"]
+    },
+    "supabase": {
+      "serverHelpers": ["src/lib/supabaseServer.ts", "src/server/supabaseAdmin.ts"],
+      "rlsSensitiveTables": ["vendors", "sources", "facts", "compare_runs", "compare_rows"]
+    }
+  },
+  "database": {
+    "tables": [
+      {"name": "vendors", "columns": ["id", "org_id", "name", "website", "official_site_confidence", "socials"], "indexes": ["idx_vendors_org_id", "idx_vendors_name"], "rls": "org-scoped access"},
+      {"name": "sources", "columns": ["id", "vendor_id", "metric", "url", "title", "body", "first_party", "fetched_at", "body_hash", "source_score"], "indexes": ["idx_sources_vendor_id", "idx_sources_metric"], "rls": "org-scoped via vendor"},
+      {"name": "facts", "columns": ["id", "vendor_id", "metric", "key", "value", "text_summary", "citations", "fact_score", "computed_at"], "indexes": ["idx_facts_vendor_id", "idx_facts_metric"], "rls": "org-scoped via vendor"},
+      {"name": "compare_runs", "columns": ["id", "org_id", "you_vendor_id", "comp_vendor_id", "version", "frozen_at", "created_at"], "indexes": ["idx_compare_runs_org_id"], "rls": "org-scoped"},
+      {"name": "compare_rows", "columns": ["id", "run_id", "metric", "you_text", "comp_text", "you_citations", "comp_citations", "answer_score_you", "answer_score_comp"], "indexes": ["idx_compare_rows_run_id"], "rls": "org-scoped via run"},
+      {"name": "battlecard_bullets", "columns": ["id", "run_id", "section", "text", "citations", "answer_score", "persona", "computed_at"], "indexes": ["idx_battlecard_bullets_run_id"], "rls": "org-scoped via run"},
+      {"name": "update_events", "columns": ["id", "vendor_id", "metric", "type", "old", "new", "severity", "detected_at", "source_ids"], "indexes": ["idx_update_events_vendor_id"], "rls": "org-scoped via vendor"},
+      {"name": "personal_saves", "columns": ["id", "user_id", "org_id", "base_run_id", "name", "snapshot", "created_at"], "indexes": ["idx_personal_saves_user_id"], "rls": "user-scoped"},
+      {"name": "org_snapshots", "columns": ["id", "org_id", "base_run_id", "name", "snapshot", "created_at"], "indexes": ["idx_org_snapshots_org_id"], "rls": "org-scoped"}
+    ],
+    "missingTablesReferenced": [],
+    "migrations": ["migrations/2025-09-21_facts_pipeline.sql", "migrations/complete-facts-pipeline.sql", "migrations/clerk-migration.sql"]
+  },
+  "pipelines": {
+    "legacy": {
+      "stages": ["SerpAPI Query", "raw_hits", "LLM classify", "claims + citations", "Results/Compare UI"],
+      "entrypoints": ["/api/runs/start"],
+      "diagrams": ["legacy-pipeline"]
+    },
+    "facts": {
+      "stages": ["Direct fetch (JSON/DOM/headless)", "vendors/sources/facts", "compare_runs/rows", "Compare UI + Battlecards"],
+      "entrypoints": ["/api/test-facts-pipeline", "facts collectors"],
+      "diagrams": ["facts-pipeline"]
+    }
+  },
+  "integrations": [
+    {"service": "SerpAPI", "env": ["SERPAPI_KEY"], "init": "src/lib/collect/serp.ts", "usedIn": ["legacy pipeline"]},
+    {"service": "OpenAI", "env": ["OPENAI_API_KEY"], "init": "src/lib/llm.ts", "usedIn": ["LLM classification"]},
+    {"service": "Playwright", "env": ["FACTS_HEADLESS_ENABLED"], "init": "src/lib/facts/headless.ts", "usedIn": ["headless rendering"]},
+    {"service": "Clerk", "env": ["NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "CLERK_SECRET_KEY"], "init": "src/app/layout.tsx", "usedIn": ["authentication"]},
+    {"service": "Supabase", "env": ["NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"], "init": "src/lib/supabaseServer.ts", "usedIn": ["database"]}
+  ],
+  "env": [
+    {"name": "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "usedIn": ["src/app/layout.tsx"], "required": true, "example": "pk_test_..."},
+    {"name": "CLERK_SECRET_KEY", "usedIn": ["src/app/actions/org-actions.ts"], "required": true, "example": "sk_test_..."},
+    {"name": "NEXT_PUBLIC_SUPABASE_URL", "usedIn": ["src/lib/supabaseServer.ts"], "required": true, "example": "https://xxx.supabase.co"},
+    {"name": "SUPABASE_SERVICE_ROLE_KEY", "usedIn": ["src/lib/supabaseServer.ts"], "required": true, "example": "eyJ..."},
+    {"name": "SERPAPI_KEY", "usedIn": ["src/lib/collect/serp.ts"], "required": true, "example": "..."},
+    {"name": "OPENAI_API_KEY", "usedIn": ["src/lib/llm.ts"], "required": false, "example": "sk-..."},
+    {"name": "FACTS_PIPELINE_ENABLED", "usedIn": ["src/lib/flags.ts"], "required": false, "example": "true"},
+    {"name": "FACTS_HEADLESS_ENABLED", "usedIn": ["src/lib/facts/headless.ts"], "required": false, "example": "1"},
+    {"name": "DRY_RUN", "usedIn": ["src/lib/facts/persist.ts"], "required": false, "example": "1"},
+    {"name": "NEXT_PUBLIC_APP_URL", "usedIn": ["src/app/auth/callback/route.ts"], "required": false, "example": "http://localhost:3000"}
+  ],
+  "buildDeploy": {
+    "node": "18.x",
+    "vercel": false,
+    "netlify": false,
+    "ci": []
+  },
+  "knownIssues": [
+    "RLS Permission Denied on facts tables - simplified policies allow all authenticated users",
+    "UUID mapping between Clerk org and DB - hardcoded org UUID in runs/start",
+    "Facts pipeline feature flag disabled by default",
+    "Headless rendering requires Playwright installation",
+    "Dry run mode affects persistence behavior"
+  ],
+  "todos": [
+    {"file": "src/app/api/cron/autosync/route.ts", "line": 4, "text": "TODO: Implement nightly autosync logic"},
+    {"file": "src/app/onboarding/page.tsx", "line": 25, "text": "TODO: Check if user is admin of the org"}
+  ]
+}

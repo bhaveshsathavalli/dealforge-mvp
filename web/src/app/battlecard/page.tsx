@@ -1,0 +1,303 @@
+'use client';
+
+import { useSearchParams } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { useAuth } from '@clerk/nextjs';
+import SourceChip from '@/components/battlecard/SourceChip';
+import PricingCard from '@/components/battlecard/PricingCard';
+import FeaturesHeatmap from '@/components/battlecard/FeaturesHeatmap';
+import TrustCard from '@/components/battlecard/TrustCard';
+import ChangelogCard from '@/components/battlecard/ChangelogCard';
+import LandminesList from '@/components/battlecard/LandminesList';
+import PersonaToggle from '@/components/battlecard/PersonaToggle';
+import ComposeButtons from '@/components/battlecard/ComposeButtons';
+
+interface BattlecardData {
+  pricing: any[];
+  features: any[];
+  integrations: any[];
+  trust: {
+    badges: any[];
+    links: any[];
+  };
+  changelog: any[];
+  heatmap: any[];
+  narrative?: {
+    overview?: string;
+    whyTheyWin?: string[];
+    whyWeWin?: string[];
+    talkTracks?: string[];
+    objections?: string[];
+    questions?: string[];
+    landmines?: string[];
+  };
+}
+
+export default function BattlecardPage() {
+  const searchParams = useSearchParams();
+  const { userId, orgId, isLoaded } = useAuth();
+  const [vendorId, setVendorId] = useState<string | null>(null);
+  const [data, setData] = useState<BattlecardData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedPersona, setSelectedPersona] = useState<'AE' | 'SE' | 'Exec'>('AE');
+
+  useEffect(() => {
+    const v = searchParams.get('v');
+    if (v) {
+      // Handle cases where the URL might include "VENDOR_ID=" prefix
+      const vendorId = v.includes('VENDOR_ID=') ? v.split('VENDOR_ID=')[1] : v;
+      setVendorId(vendorId);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (isLoaded && userId && vendorId) {
+      fetchBattlecardData();
+    }
+  }, [isLoaded, userId, vendorId]);
+
+  const fetchBattlecardData = async () => {
+    if (!vendorId) return;
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      console.log('Fetching battlecard data for vendor:', vendorId);
+      const response = await fetch(`/api/vendors/${vendorId}/battlecard`);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Battlecard API error:', response.status, errorText);
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+      
+      const result = await response.json();
+      console.log('Battlecard data received:', result);
+      setData(result);
+    } catch (err: any) {
+      console.error('Error fetching battlecard data:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRefresh = async (lane: string) => {
+    if (!vendorId) return;
+    
+    try {
+      const response = await fetch(`/api/vendors/${vendorId}/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lanes: [lane] })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const result = await response.json();
+      console.log(`Refresh ${lane}:`, result[lane]);
+      
+      // Refetch battlecard data
+      await fetchBattlecardData();
+    } catch (err: any) {
+      console.error(`Error refreshing ${lane}:`, err);
+    }
+  };
+
+  const handleCompose = async () => {
+    if (!vendorId) return;
+    
+    try {
+      const response = await fetch(`/api/vendors/${vendorId}/compose`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ persona: selectedPersona })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const result = await response.json();
+      console.log('Compose result:', result);
+      
+      // Refetch battlecard data to get updated narrative
+      await fetchBattlecardData();
+    } catch (err: any) {
+      console.error('Error composing:', err);
+    }
+  };
+
+  if (!isLoaded) {
+    return <div className="p-8">Loading authentication...</div>;
+  }
+
+  if (!userId) {
+    return <div className="p-8">Please sign in to view battlecards.</div>;
+  }
+
+  // Note: orgId check removed - the new org resolver handles fallbacks automatically
+
+  if (!vendorId) {
+    return <div className="p-8">No vendor ID provided. Add ?v=VENDOR_ID to the URL.</div>;
+  }
+
+  if (loading) {
+    return <div className="p-8">Loading battlecard data...</div>;
+  }
+
+  if (error) {
+    return <div className="p-8 text-red-600">Error: {error}</div>;
+  }
+
+  if (!data) {
+    return <div className="p-8">No data available.</div>;
+  }
+
+  return (
+    <div className="p-6 max-w-7xl mx-auto">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-semibold">Battlecard</h1>
+        <div className="flex items-center gap-4">
+          <PersonaToggle 
+            selectedPersona={selectedPersona} 
+            onPersonaChange={setSelectedPersona} 
+          />
+          <ComposeButtons onCompose={handleCompose} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Left Column - Narrative */}
+        <div className="space-y-6">
+          <div className="bg-white border rounded-lg p-4">
+            <h2 className="text-lg font-semibold mb-3">Overview</h2>
+            {data.narrative?.overview ? (
+              <p className="text-gray-700">{data.narrative.overview}</p>
+            ) : (
+              <p className="text-gray-500 italic">No overview available. Click "Compose" to generate.</p>
+            )}
+          </div>
+
+          <div className="bg-white border rounded-lg p-4">
+            <h2 className="text-lg font-semibold mb-3">Why They Win</h2>
+            {data.narrative?.whyTheyWin?.length ? (
+              <ul className="space-y-2">
+                {data.narrative.whyTheyWin.map((item, index) => (
+                  <li key={index} className="flex items-start gap-2">
+                    <span className="text-red-500">•</span>
+                    <span className="text-gray-700">{item}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-gray-500 italic">No advantages identified. Click "Compose" to generate.</p>
+            )}
+          </div>
+
+          <div className="bg-white border rounded-lg p-4">
+            <h2 className="text-lg font-semibold mb-3">Why We Win</h2>
+            {data.narrative?.whyWeWin?.length ? (
+              <ul className="space-y-2">
+                {data.narrative.whyWeWin.map((item, index) => (
+                  <li key={index} className="flex items-start gap-2">
+                    <span className="text-green-500">•</span>
+                    <span className="text-gray-700">{item}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-gray-500 italic">No advantages identified. Click "Compose" to generate.</p>
+            )}
+          </div>
+
+          <div className="bg-white border rounded-lg p-4">
+            <h2 className="text-lg font-semibold mb-3">Talk Tracks</h2>
+            {data.narrative?.talkTracks?.length ? (
+              <ul className="space-y-2">
+                {data.narrative.talkTracks.map((item, index) => (
+                  <li key={index} className="flex items-start gap-2">
+                    <span className="text-blue-500">•</span>
+                    <span className="text-gray-700">{item}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-gray-500 italic">No talk tracks available. Click "Compose" to generate.</p>
+            )}
+          </div>
+
+          <div className="bg-white border rounded-lg p-4">
+            <h2 className="text-lg font-semibold mb-3">Objections</h2>
+            {data.narrative?.objections?.length ? (
+              <ul className="space-y-2">
+                {data.narrative.objections.map((item, index) => (
+                  <li key={index} className="flex items-start gap-2">
+                    <span className="text-orange-500">•</span>
+                    <span className="text-gray-700">{item}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-gray-500 italic">No objections identified. Click "Compose" to generate.</p>
+            )}
+          </div>
+
+          <div className="bg-white border rounded-lg p-4">
+            <h2 className="text-lg font-semibold mb-3">Questions</h2>
+            {data.narrative?.questions?.length ? (
+              <ul className="space-y-2">
+                {data.narrative.questions.map((item, index) => (
+                  <li key={index} className="flex items-start gap-2">
+                    <span className="text-purple-500">•</span>
+                    <span className="text-gray-700">{item}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-gray-500 italic">No questions available. Click "Compose" to generate.</p>
+            )}
+          </div>
+        </div>
+
+        {/* Right Column - Data Cards */}
+        <div className="space-y-6">
+          <PricingCard 
+            data={data.pricing} 
+            onRefresh={() => handleRefresh('pricing')} 
+          />
+          
+          <FeaturesHeatmap 
+            data={data.heatmap} 
+            onRefresh={() => handleRefresh('features')} 
+          />
+          
+          <LandminesList 
+            data={data.narrative?.landmines || []} 
+            onRefresh={() => handleRefresh('features')} 
+          />
+          
+          <ChangelogCard 
+            data={data.changelog} 
+            onRefresh={() => handleRefresh('changelog')} 
+          />
+          
+          <TrustCard 
+            data={data.trust} 
+            onRefresh={() => handleRefresh('trust')} 
+          />
+
+          {/* Demos placeholder */}
+          <div className="bg-white border rounded-lg p-4">
+            <h2 className="text-lg font-semibold mb-3">Demos</h2>
+            <p className="text-gray-500 italic">Demo content placeholder</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

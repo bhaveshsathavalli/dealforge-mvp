@@ -1,48 +1,22 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
-import { supabaseAdmin } from '@/server/supabaseAdmin';
+import { withOrgId } from '@/server/withOrg';
+import { supabaseServer } from '@/lib/supabaseServer';
 
-export async function GET() {
+export const GET = withOrgId(async ({ orgId }) => {
   console.log('Onboarding Status API: GET /api/user/onboarding-status called');
   
   try {
-    // Get the authenticated user from Clerk
-    const { userId } = await auth();
-    if (!userId) {
-      console.log('Onboarding Status API: User not authenticated');
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-    }
+    const supabase = supabaseServer();
 
-    console.log('Onboarding Status API: User authenticated:', userId);
+    // User has an organization - check for competitors
+    const { data: competitorsData } = await supabase
+      .from('competitors')
+      .select('name, aliases')
+      .eq('org_id', orgId)
+      .order('name');
 
-    // Use server-only Supabase client
-    const supabase = supabaseAdmin;
-
-    // Check if user has an organization
-    const { data: membership, error: membershipError } = await supabase
-      .from('org_members')
-      .select('org_id')
-      .eq('user_id', userId) // Use Clerk userId (string)
-      .single();
-
-    let competitors: Array<{ name: string; aliases: string[] }> = [];
-    let onboardingCompleted = false;
-
-    if (membership && !membershipError) {
-      // User has an organization - check for competitors
-      const { data: competitorsData } = await supabase
-        .from('competitors')
-        .select('name, aliases')
-        .eq('org_id', membership.org_id)
-        .order('name');
-
-      competitors = competitorsData || [];
-      onboardingCompleted = true; // If they have an org, consider onboarding completed
-    } else {
-      // User doesn't have an organization yet
-      console.log('Onboarding Status API: User has no organization membership yet');
-      onboardingCompleted = false;
-    }
+    const competitors: Array<{ name: string; aliases: string[] }> = competitorsData || [];
+    const onboardingCompleted = true; // If they have an org, consider onboarding completed
 
     console.log('Onboarding Status API: Status:', { 
       completed: onboardingCompleted, 
@@ -66,4 +40,4 @@ export async function GET() {
       details: error instanceof Error ? error.message : 'Unknown error' 
     }, { status: 500 });
   }
-}
+});

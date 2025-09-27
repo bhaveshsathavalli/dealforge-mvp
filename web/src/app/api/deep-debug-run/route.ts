@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { requireOrg } from "@/lib/authz";
+import { withOrgId } from "@/server/withOrg";
+import { supabaseServer } from "@/lib/supabaseServer";
 
-export async function GET(request: Request) {
+export const GET = withOrgId(async ({ orgId }, request: Request) => {
   try {
-    const { orgId } = await requireOrg();
-    const sb = await createClient();
+    const sb = supabaseServer();
     const { searchParams } = new URL(request.url);
     const runId = searchParams.get('runId');
     
@@ -18,6 +17,7 @@ export async function GET(request: Request) {
       .from("query_runs")
       .select("id, org_id, query_text, status, created_at")
       .eq("id", runId)
+      .eq("org_id", orgId)
       .single();
     
     // Check new system
@@ -25,6 +25,7 @@ export async function GET(request: Request) {
       .from("compare_runs")
       .select("id, org_id, you_vendor_id, comp_vendor_id, created_at")
       .eq("id", runId)
+      .eq("org_id", orgId)
       .single();
     
     // Check if there are any compare_rows for this run
@@ -58,4 +59,4 @@ export async function GET(request: Request) {
       error: error instanceof Error ? error.message : "Unknown error" 
     }, { status: 500 });
   }
-}
+});

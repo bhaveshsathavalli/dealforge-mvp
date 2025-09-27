@@ -1,31 +1,16 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
-import { supabaseAdmin } from '@/server/supabaseAdmin';
+import { withOrgId } from '@/server/withOrg';
+import { supabaseServer } from '@/lib/supabaseServer';
 
-export async function GET() {
+export const GET = withOrgId(async ({ orgId }) => {
   try {
-    const { userId, orgId } = await auth();
-    
-    if (!userId || !orgId) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-    }
-
-    // Get organization data using service role
-    const { data: org, error: orgError } = await supabaseAdmin
-      .from("orgs")
-      .select("id")
-      .eq('clerk_org_id', orgId)
-      .single();
-      
-    if (orgError || !org) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
-    }
+    const sb = supabaseServer();
 
     // Get competitors for the organization
-    const { data: competitors, error: competitorsError } = await supabaseAdmin
+    const { data: competitors, error: competitorsError } = await sb
       .from('competitors')
       .select('id, name, website, slug, active, aliases')
-      .eq('org_id', org.id)
+      .eq('org_id', orgId)
       .eq('active', true)
       .order('created_at', { ascending: false });
 
@@ -41,16 +26,10 @@ export async function GET() {
       details: error instanceof Error ? error.message : 'Unknown error'
     }, { status: 500 });
   }
-}
+});
 
-export async function POST(req: Request) {
+export const POST = withOrgId(async ({ orgId }, req: Request) => {
   try {
-    const { userId, orgId } = await auth();
-    
-    if (!userId || !orgId) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-    }
-
     // Handle both JSON and FormData requests
     let name: string, website: string | undefined, aliases: string[] = [];
     
@@ -72,22 +51,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Competitor name is required' }, { status: 400 });
     }
 
-    // Get organization data using service role
-    const { data: org, error: orgError } = await supabaseAdmin
-      .from("orgs")
-      .select("id")
-      .eq('clerk_org_id', orgId)
-      .single();
-      
-    if (orgError || !org) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
-    }
+    const sb = supabaseServer();
 
     // Insert new competitor
-    const { data: newCompetitor, error: insertError } = await supabaseAdmin
+    const { data: newCompetitor, error: insertError } = await sb
       .from('competitors')
       .insert({
-        org_id: org.id,
+        org_id: orgId,
         name: name,
         website: website,
         aliases: aliases,
@@ -111,4 +81,4 @@ export async function POST(req: Request) {
       details: error instanceof Error ? error.message : 'Unknown error'
     }, { status: 500 });
   }
-}
+});

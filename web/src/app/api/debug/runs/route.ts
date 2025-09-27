@@ -1,31 +1,12 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { withOrgId } from '@/server/withOrg';
+import { supabaseServer } from '@/lib/supabaseServer';
 
-export async function GET() {
+export const GET = withOrgId(async ({ orgId }) => {
   console.log('Debug Runs API: GET /api/debug/runs called');
   
   try {
-    const supabase = await createClient();
-
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (userError || !user) {
-      console.log('Debug Runs API: User not authenticated');
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-    }
-
-    console.log('Debug Runs API: User authenticated:', user.id);
-
-    // Get user's organization
-    const { data: membership, error: membershipError } = await supabase
-      .from('org_members')
-      .select('org_id')
-      .eq('user_id', user.id)
-      .single();
-
-    if (membershipError || !membership) {
-      console.log('Debug Runs API: No organization membership found');
-      return NextResponse.json({ error: 'No organization membership' }, { status: 403 });
-    }
+    const supabase = supabaseServer();
 
     // Get runs for the organization
     const { data: runs, error: runsError } = await supabase
@@ -37,7 +18,7 @@ export async function GET() {
         updated_at,
         query_text
       `)
-      .eq('org_id', membership.org_id)
+      .eq('org_id', orgId)
       .order('created_at', { ascending: false });
 
     if (runsError) {
@@ -74,4 +55,4 @@ export async function GET() {
       details: error instanceof Error ? error.message : 'Unknown error' 
     }, { status: 500 });
   }
-}
+});

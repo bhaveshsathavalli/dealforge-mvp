@@ -1,23 +1,10 @@
-import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
+import { withOrg } from "@/server/withOrg";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { collectForRun } from "@/lib/collect/adapter";
 import { randomUUID } from "crypto";
 
-export async function POST(req: Request) {
-  const { userId, orgId } = await auth();
-  
-  console.log("[api/runs/start] Auth check:", { userId: !!userId, orgId });
-  
-  if (!userId) {
-    console.log("[api/runs/start] No userId, returning 401");
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
-  if (!orgId) {
-    console.log("[api/runs/start] No orgId, returning 400");
-    return NextResponse.json({ error: "no_org" }, { status: 400 });
-  }
-
+export const POST = withOrg(async ({ orgId, clerkUserId }, req: Request) => {
   const { query } = await req.json();
   if (!query || typeof query !== "string") {
     console.log("[api/runs/start] Invalid query:", query);
@@ -31,9 +18,9 @@ export async function POST(req: Request) {
       .insert({ 
         query_text: query, 
         status: "collecting", 
-        org_id: "24380377-0628-4469-83e0-2422a1a883d8", // Use existing org UUID
-        clerk_org_id: orgId,
-        clerk_user_id: userId
+        org_id: orgId,
+        clerk_org_id: null, // We're using internal org_id now
+        clerk_user_id: clerkUserId
       })
       .select("id")
       .single();

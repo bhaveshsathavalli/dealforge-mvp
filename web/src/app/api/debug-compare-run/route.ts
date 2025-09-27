@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { getOrgUuidFromClerk } from "@/lib/org/ids";
+import { withOrgId } from "@/server/withOrg";
+import { supabaseServer } from "@/lib/supabaseServer";
 
-export async function GET(request: NextRequest) {
+export const GET = withOrgId(async ({ orgId }, request: NextRequest) => {
   try {
-    const { orgUuid } = await getOrgUuidFromClerk();
-    const sb = await createClient();
+    const sb = supabaseServer();
     
     // Get the runId from query params
     const { searchParams } = new URL(request.url);
@@ -18,13 +17,14 @@ export async function GET(request: NextRequest) {
       }, { status: 400 });
     }
     
-    console.log(`[DebugCompareRun] Looking for run: ${runId} in org: ${orgUuid}`);
+    console.log(`[DebugCompareRun] Looking for run: ${runId} in org: ${orgId}`);
     
     // Try to get the run
     const { data: run, error: runError } = await sb
       .from("compare_runs")
       .select("*")
       .eq("id", runId)
+      .eq("org_id", orgId)
       .single();
       
     if (runError) {
@@ -45,15 +45,7 @@ export async function GET(request: NextRequest) {
       }, { status: 404 });
     }
     
-    // Check if the run belongs to the current org
-    if (run.org_id !== orgUuid) {
-      return NextResponse.json({ 
-        success: false, 
-        error: "Run belongs to different org",
-        runOrgId: run.org_id,
-        currentOrgId: orgUuid
-      }, { status: 403 });
-    }
+    // Run is already scoped by org_id in the query above
     
     // Get the rows
     const { data: rows, error: rowsError } = await sb
@@ -79,4 +71,4 @@ export async function GET(request: NextRequest) {
       error: `Unexpected error: ${error instanceof Error ? error.message : 'Unknown error'}` 
     }, { status: 500 });
   }
-}
+});

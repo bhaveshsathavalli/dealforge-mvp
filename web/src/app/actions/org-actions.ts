@@ -128,8 +128,8 @@ export async function createOrganization(formData: FormData) {
 
     console.log('Organization created:', org.id);
     
-    revalidatePath('/app');
-    redirect('/app');
+    revalidatePath('/dashboard');
+    redirect('/dashboard');
     
   } catch (error) {
     console.error('Error creating organization:', error);

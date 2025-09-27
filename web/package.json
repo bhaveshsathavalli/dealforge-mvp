@@ -18,7 +18,8 @@
     "dev-pricing": "tsx scripts/dev-pricing.ts",
     "dev-features": "tsx scripts/dev-features.ts",
     "dev-integrations": "tsx scripts/dev-integrations.ts",
-    "smoke:facts": "node scripts/dev-loop.js"
+    "smoke:facts": "tsx scripts/dev-extract.ts",
+    "backfill:org": "tsx scripts/backfill-org-id.ts --apply"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.32.0",

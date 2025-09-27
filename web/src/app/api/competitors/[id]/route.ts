@@ -1,34 +1,18 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
-import { supabaseAdmin } from '@/server/supabaseAdmin';
+import { withOrgId } from '@/server/withOrg';
+import { supabaseServer } from '@/lib/supabaseServer';
 
-export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
+export const DELETE = withOrgId(async ({ orgId }, req: Request, { params }: { params: Promise<{ id: string }> }) => {
   try {
-    const { userId, orgId } = await auth();
-    
-    if (!userId || !orgId) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-    }
-
     const { id } = await params;
-
-    // Get organization data using service role
-    const { data: org, error: orgError } = await supabaseAdmin
-      .from("orgs")
-      .select("id")
-      .eq('clerk_org_id', orgId)
-      .single();
-      
-    if (orgError || !org) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
-    }
+    const sb = supabaseServer();
 
     // Delete competitor (soft delete by setting active = false)
-    const { data: deletedCompetitor, error: deleteError } = await supabaseAdmin
+    const { data: deletedCompetitor, error: deleteError } = await sb
       .from('competitors')
       .update({ active: false })
       .eq('id', id)
-      .eq('org_id', org.id) // Ensure user can only delete their org's competitors
+      .eq('org_id', orgId) // Ensure user can only delete their org's competitors
       .select('id, name')
       .single();
 
@@ -51,4 +35,4 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
       details: error instanceof Error ? error.message : 'Unknown error'
     }, { status: 500 });
   }
-}
+});

@@ -6,7 +6,13 @@ export const metadata = { title: 'DealForge', description: 'CI MVP' };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <ClerkProvider>
+    <ClerkProvider
+      publishableKey={process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+      signInUrl="/sign-in"
+      signUpUrl="/sign-up"
+      afterSignInUrl="/welcome"
+      afterSignUpUrl="/welcome"
+    >
       <html lang="en" suppressHydrationWarning>
         <body>
           {children}
