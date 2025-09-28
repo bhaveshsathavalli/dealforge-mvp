@@ -43,28 +43,20 @@ export default function TeamPanel({ role }: TeamPanelProps) {
         
         // Load members
         const membersRes = await fetch('/api/team/members');
-        const membersData = await readJsonSafely(membersRes);
-        if (!cancelled) {
-          if (membersData?.ok) {
+        if (membersRes.ok) {
+          const membersData = await readJsonSafely(membersRes);
+          if (!cancelled && membersData?.ok) {
             setMembers(membersData.data?.members || []);
-          } else {
-            console.error('Failed to load members:', membersData?.error);
-            if (membersData?.error?.code === 'UNAUTHENTICATED') {
-              // User not authenticated, will be redirected
-              return;
-            }
           }
         }
         
         // Load invitations (admin only)
         if (isAdmin) {
           const invitesRes = await fetch('/api/team/invitations');
-          const invitesData = await readJsonSafely(invitesRes);
-          if (!cancelled) {
-            if (invitesData?.ok) {
+          if (invitesRes.ok) {
+            const invitesData = await readJsonSafely(invitesRes);
+            if (!cancelled && invitesData?.ok) {
               setInvitations(invitesData.data?.invitations || []);
-            } else {
-              console.error('Failed to load invitations:', invitesData?.error);
             }
           }
         }
@@ -84,7 +76,7 @@ export default function TeamPanel({ role }: TeamPanelProps) {
     const res = await fetch('/api/team/invitations', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email: inviteEmail, role: 'member' }),
+      body: JSON.stringify({ email: inviteEmail, role: 'org:member' }),
     });
     
     const data = await readJsonSafely(res);
@@ -282,10 +274,10 @@ export default function TeamPanel({ role }: TeamPanelProps) {
             <select
               className="border rounded px-3 py-2"
               data-testid="invite-role"
-              defaultValue="member"
+              defaultValue="org:member"
             >
-              <option value="member">Member</option>
-              <option value="admin">Admin</option>
+              <option value="org:member">Member</option>
+              <option value="org:admin">Admin</option>
             </select>
             <button 
               onClick={invite} 

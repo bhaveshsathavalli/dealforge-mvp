@@ -1,6 +1,6 @@
 // src/server/orgContext.ts
 import { auth } from '@clerk/nextjs/server'
-import { clerkClient } from '@clerk/nextjs'
+import { clerkClient } from '@clerk/nextjs/server'
 
 type Role = 'admin' | 'member'
 type Ctx =
@@ -14,7 +14,7 @@ function mapRole(r?: string | null): Role {
 
 export async function resolveOrgContext(): Promise<Ctx> {
  try {
-   const { userId, orgId, sessionClaims } = auth()
+   const { userId, orgId, sessionClaims } = await auth()
    if (!userId) return { ok: false, reason: 'UNAUTHENTICATED' }
 
    // 1) Fast path via session claims
@@ -24,7 +24,8 @@ export async function resolveOrgContext(): Promise<Ctx> {
    if (!orgId || role === 'member') {
      try {
        if (orgId) {
-         const list = await clerkClient.organizations.getOrganizationMembershipList({
+         const client = await clerkClient()
+         const list = await client.organizations.getOrganizationMembershipList({
            organizationId: orgId,
            limit: 100,
          })
@@ -33,7 +34,8 @@ export async function resolveOrgContext(): Promise<Ctx> {
          )
          if (mine?.role) role = mapRole(mine.role)
        } else {
-         const list = await clerkClient.users.getOrganizationMembershipList({ userId })
+         const client = await clerkClient()
+         const list = await client.users.getOrganizationMembershipList({ userId })
          const active = (list as any)?.data?.[0]
          if (active?.role) role = mapRole(active.role)
        }

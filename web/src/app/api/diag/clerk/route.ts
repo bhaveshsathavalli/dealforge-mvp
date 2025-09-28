@@ -1,7 +1,7 @@
 // src/app/api/diag/clerk/route.ts
 import { NextResponse } from 'next/server'
 import { resolveOrgContext } from '@/server/orgContext'
-import { clerkClient } from '@clerk/nextjs'
+import { clerkClient } from '@clerk/nextjs/server'
 
 export async function GET() {
   const ctx = await resolveOrgContext()
@@ -19,7 +19,8 @@ export async function GET() {
     payload.data.canInvite = ctx.role === 'admin'
     if (ctx.orgId) {
       try {
-        const org = await clerkClient.organizations.getOrganization({ organizationId: ctx.orgId })
+        const client = await clerkClient()
+        const org = await client.organizations.getOrganization({ organizationId: ctx.orgId })
         payload.data.orgExists = !!org?.id
       } catch (e: any) {
         payload.data.clerkError = { code: e?.errors?.[0]?.code, message: e?.message }
