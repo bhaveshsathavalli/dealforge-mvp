@@ -1,98 +1,87 @@
 import { NextResponse } from 'next/server';
-import { clerkClient } from '@clerk/nextjs/server';
 import { resolveOrgContext } from '@/server/orgContext';
+import { supabaseAdmin } from '@/server/supabaseAdmin';
 
-export async function GET(req: Request) {
+export async function GET() {
   try {
-    console.log('invites.clerk', JSON.stringify({ evt: 'members_start' }));
-    
-    // Get org context
     const ctx = await resolveOrgContext();
     
     if (!ctx.ok) {
-      console.log('invites.clerk', JSON.stringify({ 
-        evt: 'members_auth_failed', 
-        reason: ctx.reason 
-      }));
-      
       return NextResponse.json({
         ok: false,
-        error: { 
-          code: ctx.reason === 'UNAUTHENTICATED' ? 'UNAUTHENTICATED' : 'AUTH_ERROR',
-          message: ctx.reason === 'UNAUTHENTICATED' ? 'Not authenticated' : 'Authentication failed'
-        }
+        error: { code: 'UNAUTHENTICATED', message: 'Not authenticated' }
       }, { status: 401 });
     }
 
     if (!ctx.orgId) {
-      console.log('invites.clerk', JSON.stringify({ evt: 'members_no_org' }));
-      
       return NextResponse.json({
-        ok: false,
-        error: { code: 'NO_ORG', message: 'No organization selected' }
-      }, { status: 400 });
+        ok: true,
+        data: { members: [] }
+      });
     }
 
-    if (ctx.role !== 'admin' && ctx.role !== 'member') {
-      console.log('invites.clerk', JSON.stringify({ 
-        evt: 'members_forbidden', 
-        role: ctx.role 
-      }));
-      
-      return NextResponse.json({
-        ok: false,
-        error: { code: 'FORBIDDEN', message: 'Access denied' }
-      }, { status: 403 });
-    }
-
-    console.log('invites.clerk', JSON.stringify({
-      evt: 'members_fetching',
+    console.info('team.members', JSON.stringify({
+      evt: 'start',
       orgId: ctx.orgId,
       userId: ctx.userId
     }));
 
-    // Fetch members from Clerk
-    const memberships = await clerkClient.organizations.getOrganizationMembershipList({
-      organizationId: ctx.orgId,
-      limit: 100
-    });
+    try {
+      // Query Supabase view v_org_team filtered by clerk_org_id
+      const { data: members, error } = await supabaseAdmin
+        .from('v_org_team')
+        .select('*')
+        .eq('clerk_org_id', ctx.orgId);
 
-    const members = memberships.data.map(membership => ({
-      membershipId: membership.id,
-      email: membership.publicUserData?.identifier || '',
-      name: membership.publicUserData?.firstName && membership.publicUserData?.lastName 
-        ? `${membership.publicUserData.firstName} ${membership.publicUserData.lastName}`
-        : membership.publicUserData?.firstName || membership.publicUserData?.identifier || '',
-      imageUrl: membership.publicUserData?.imageUrl || null,
-      role: membership.role,
-      createdAt: membership.createdAt
-    }));
+      if (error) {
+        console.error('team.members', JSON.stringify({
+          evt: 'db_error',
+          orgId: ctx.orgId,
+          error: error.message
+        }));
 
-    console.log('invites.clerk', JSON.stringify({
-      evt: 'members_success',
-      orgId: ctx.orgId,
-      userId: ctx.userId,
-      count: members.length
-    }));
+        return NextResponse.json({
+          ok: false,
+          error: { code: 'DB_ERROR', message: error.message }
+        }, { status: 500 });
+      }
 
-    return NextResponse.json({
-      ok: true,
-      data: { members }
-    });
+      console.info('team.members', JSON.stringify({
+        evt: 'success',
+        orgId: ctx.orgId,
+        userId: ctx.userId,
+        count: members?.length || 0
+      }));
+
+      return NextResponse.json({
+        ok: true,
+        data: { members: members || [] }
+      });
+
+    } catch (dbError: any) {
+      console.error('team.members', JSON.stringify({
+        evt: 'db_exception',
+        orgId: ctx.orgId,
+        error: dbError.message
+      }));
+
+      return NextResponse.json({
+        ok: false,
+        error: { code: 'DB_ERROR', message: dbError.message }
+      }, { status: 500 });
+    }
 
   } catch (error: any) {
-    console.error('invites.clerk', JSON.stringify({
-      evt: 'members_error',
-      error: error.message,
-      code: error?.errors?.[0]?.code,
-      where: 'GET /api/team/members'
+    console.error('team.members', JSON.stringify({
+      evt: 'fatal',
+      error: error.message
     }));
 
     return NextResponse.json({
       ok: false,
       error: { 
-        code: error?.errors?.[0]?.code || 'CLERK_ERROR', 
-        message: error?.errors?.[0]?.message || 'Failed to fetch members'
+        code: 'FATAL_ERROR', 
+        message: 'Failed to fetch members'
       }
     }, { status: 500 });
   }
