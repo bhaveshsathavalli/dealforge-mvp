@@ -59,3 +59,5 @@ export default function TrustCard({ data, onRefresh }: TrustCardProps) {
     </div>
   );
 }
+
+

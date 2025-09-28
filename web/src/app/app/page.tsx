@@ -15,21 +15,6 @@ export default async function AppPage() {
     redirect('/orgs');
   }
 
-  // Check if onboarding is completed for this org
-  const { data: org } = await supabaseAdmin
-    .from('orgs')
-    .select('onboarding_completed')
-    .eq('clerk_org_id', orgId)
-    .single();
-
-  // Check user's role in the org
-  const { data: membership } = await supabaseAdmin
-    .from('org_memberships')
-    .select('role')
-    .eq('clerk_org_id', orgId)
-    .eq('clerk_user_id', userId)
-    .single();
-
   // Get organization data and competitors for the modal
   const { data: orgData } = await supabaseAdmin
     .from('orgs')
@@ -44,9 +29,6 @@ export default async function AppPage() {
     .eq('active', true)
     .order('created_at', { ascending: false });
 
-  const isAdmin = membership?.role === 'admin';
-  const needsOnboarding = isAdmin && !org?.onboarding_completed;
-
   return (
     <div className="max-w-6xl mx-auto p-6">
       <div className="flex items-center justify-between mb-6">
@@ -60,20 +42,6 @@ export default async function AppPage() {
         )}
       </div>
       
-      {needsOnboarding && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
-          <h2 className="text-lg font-semibold mb-2">Continue onboarding</h2>
-          <p className="text-gray-600 mb-4">
-            As an admin, you need to complete the onboarding process to set up your competitive intelligence workspace.
-          </p>
-          <Link 
-            href="/onboarding"
-            className="bg-yellow-600 text-white py-2 px-4 rounded-lg hover:bg-yellow-700 transition-colors"
-          >
-            Continue Onboarding
-          </Link>
-        </div>
-      )}
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         <div className="border rounded-lg p-6">

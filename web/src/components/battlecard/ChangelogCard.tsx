@@ -45,3 +45,5 @@ export default function ChangelogCard({ data, onRefresh }: ChangelogCardProps) {
     </div>
   );
 }
+
+

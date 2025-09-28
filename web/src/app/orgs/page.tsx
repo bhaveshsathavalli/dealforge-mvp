@@ -17,7 +17,7 @@ export default async function OrgSelectionPage() {
   const userOrgs = await clerkClient.users.getOrganizationMembershipList({ userId });
   
   if (userOrgs.data.length === 0) {
-    redirect('/welcome');
+    redirect('/dashboard');
   }
 
   return (

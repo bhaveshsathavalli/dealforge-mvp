@@ -36,6 +36,46 @@ The easiest way to deploy your Next.js app is to use the [Vercel Platform](https
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
 
+## Database Schema & Constraints
+
+### One-Org-Per-User Invariant
+
+The `org_memberships` table enforces a **one-org-per-user** business rule using a unique constraint on `clerk_user_id`. This means:
+
+- Each user can only belong to **one organization** at a time
+- When a user joins a new organization, their previous membership is automatically replaced
+- The `onConflict: 'clerk_user_id'` in our upsert operations ensures this behavior
+
+**Database Constraint:**
+```sql
+-- Unique constraint on clerk_user_id ensures one-org-per-user
+ALTER TABLE org_memberships 
+ADD CONSTRAINT org_memberships_one_org_per_user 
+UNIQUE (clerk_user_id);
+```
+
+**Application Logic:**
+- Webhook handlers use `onConflict: 'clerk_user_id'` for membership upserts
+- Lazy mirroring in `withOrg.ts` follows the same pattern
+- This prevents duplicate memberships and maintains data consistency
+
+### Mirroring Order
+
+All mirroring operations follow a strict order to respect foreign key constraints:
+
+1. **Upsert `orgs`** by `clerk_org_id` (name/slug if present)
+2. **Upsert `profiles`** by `clerk_user_id` (email/fullName/image)  
+3. **Upsert `org_memberships`** with conflict target `clerk_user_id`
+
+### Verification
+
+Run the SQL verification script to check constraints and counts:
+
+```bash
+# Copy and run the SQL in Supabase SQL Editor
+cat verify-constraints.sql
+```
+
 ## Headless fallback (optional)
 
 Some pricing pages render content client-side. You can enable an optional, guarded headless renderer that retries pages with Chromium **only** when:

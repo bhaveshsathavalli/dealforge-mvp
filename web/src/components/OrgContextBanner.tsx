@@ -4,12 +4,12 @@ import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 
 interface WhoamiData {
-  clerk: {
+  clerk?: {
     userId: string | null;
     clerkOrgId: string | null;
     sessionId: string | null;
   };
-  resolved: {
+  resolved?: {
     orgId: string;
     clerkUserId: string;
     clerkOrgId: string | null;
@@ -26,13 +26,13 @@ export default function OrgContextBanner() {
   useEffect(() => {
     async function fetchWhoami() {
       try {
-        const response = await fetch('/api/diag/whoami');
+        const response = await fetch('/api/debug/whoami');
         if (response.ok) {
           const data: WhoamiData = await response.json();
           setWhoamiData(data);
           
           // Show banner if user is authenticated but has no Clerk org selected
-          const shouldShow = data.clerk.userId && !data.clerk.clerkOrgId && !data.error;
+          const shouldShow = data.clerk?.userId && !data.clerk?.clerkOrgId && !data.error;
           setIsVisible(shouldShow);
         }
       } catch (error) {

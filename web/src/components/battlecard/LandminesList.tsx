@@ -31,3 +31,5 @@ export default function LandminesList({ data, onRefresh }: LandminesListProps) {
     </div>
   );
 }
+
+

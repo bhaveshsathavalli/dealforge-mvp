@@ -56,3 +56,5 @@ export default function FeaturesHeatmap({ data, onRefresh }: FeaturesHeatmapProp
     </div>
   );
 }
+
+

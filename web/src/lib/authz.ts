@@ -11,7 +11,7 @@ export async function requireOrg() {
   }
   if (!orgId) {
     console.log("[authz] No orgId, redirecting to welcome");
-    redirect("/welcome");
+    redirect("/dashboard");
   }
   
   console.log("[authz] Auth passed:", { userId, orgId });

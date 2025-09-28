@@ -7,7 +7,7 @@ export default async function CompetitorsPage() {
   const { userId, orgId } = await auth();
   
   if (!userId) { redirect('/sign-in'); }
-  if (!orgId) { redirect('/welcome'); }
+  if (!orgId) { redirect('/dashboard'); }
 
   // Get org data
   const { data: org, error: orgError } = await supabaseAdmin
@@ -18,7 +18,7 @@ export default async function CompetitorsPage() {
     
   if (orgError) { 
     console.error('Error fetching org:', orgError);
-    redirect('/welcome'); 
+    redirect('/dashboard'); 
   }
   
   // Get competitors

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { withOrgId } from '@/server/withOrg';
 import { supabaseServer } from '@/lib/supabaseServer';
 
-export const GET = withOrgId(async ({ orgId }) => {
+export const GET = withOrgId(async ({ orgId, role }) => {
   try {
     const sb = supabaseServer();
 
@@ -28,8 +28,16 @@ export const GET = withOrgId(async ({ orgId }) => {
   }
 });
 
-export const POST = withOrgId(async ({ orgId }, req: Request) => {
+export const POST = withOrgId(async ({ orgId, role }, req: Request) => {
   try {
+    console.log('POST competitor request:', { orgId, role });
+    
+    // Check if orgId is available
+    if (!orgId) {
+      console.error('No orgId available for competitor creation');
+      return NextResponse.json({ error: 'Organization not found' }, { status: 400 });
+    }
+    
     // Handle both JSON and FormData requests
     let name: string, website: string | undefined, aliases: string[] = [];
     
@@ -49,6 +57,11 @@ export const POST = withOrgId(async ({ orgId }, req: Request) => {
 
     if (!name) {
       return NextResponse.json({ error: 'Competitor name is required' }, { status: 400 });
+    }
+
+    // Only admins can create competitors
+    if (role !== 'admin') {
+      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
     const sb = supabaseServer();

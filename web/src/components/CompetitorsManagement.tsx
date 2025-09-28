@@ -23,9 +23,10 @@ interface Competitor {
 interface CompetitorsManagementProps {
   org: Organization;
   initialCompetitors: Competitor[];
+  isAdmin?: boolean;
 }
 
-export default function CompetitorsManagement({ org, initialCompetitors }: CompetitorsManagementProps) {
+export default function CompetitorsManagement({ org, initialCompetitors, isAdmin = true }: CompetitorsManagementProps) {
   const [competitors, setCompetitors] = useState<Competitor[]>(initialCompetitors);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +56,7 @@ export default function CompetitorsManagement({ org, initialCompetitors }: Compe
       const response = await fetch('/api/competitors', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           name: newCompetitor.name.trim(),
           website: newCompetitor.website.trim() || undefined,
@@ -63,7 +65,13 @@ export default function CompetitorsManagement({ org, initialCompetitors }: Compe
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
+        let errorData;
+        try {
+          errorData = await response.json();
+        } catch (jsonError) {
+          console.error('Failed to parse error response:', jsonError);
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
         throw new Error(errorData.error || 'Failed to add competitor');
       }
 
@@ -80,6 +88,16 @@ export default function CompetitorsManagement({ org, initialCompetitors }: Compe
     }
   };
 
+  // Safe JSON parsing utility
+  const readJsonSafely = async (res: Response) => {
+    const text = await res.text();
+    try { 
+      return text ? JSON.parse(text) : null; 
+    } catch { 
+      return { raw: text }; 
+    }
+  };
+
   const handleDeleteCompetitor = async (id: string) => {
     if (!confirm('Are you sure you want to delete this competitor?')) return;
 
@@ -88,20 +106,49 @@ export default function CompetitorsManagement({ org, initialCompetitors }: Compe
     setSuccess(null);
 
     try {
+      console.log('competitors.delete.ui', { event: 'attempt', id });
+      
       const response = await fetch(`/api/competitors/${id}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        credentials: 'include'
+      });
+
+      console.log('competitors.delete.ui', { 
+        event: 'response', 
+        id, 
+        status: response.status, 
+        ok: response.ok 
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to delete competitor');
+        const body = await readJsonSafely(response);
+        console.error('competitors.delete.ui', { 
+          event: 'error', 
+          id, 
+          status: response.status, 
+          body 
+        });
+        
+        const errorMessage = body?.error?.message || `Delete failed (${response.status})`;
+        setError(errorMessage);
+        setTimeout(() => setError(null), 5000);
+        return;
       }
 
+      const result = await readJsonSafely(response);
+      console.log('competitors.delete.ui', { event: 'success', id, result });
+      
+      // Optimistically remove from list
       setCompetitors(prev => prev.filter(c => c.id !== id));
       setSuccess('Competitor deleted successfully!');
       setTimeout(() => setSuccess(null), 3000);
     } catch (err: any) {
-      setError(err.message);
+      console.error('competitors.delete.ui', { 
+        event: 'exception', 
+        id, 
+        error: err.message 
+      });
+      setError(err.message || 'An unexpected error occurred');
       setTimeout(() => setError(null), 5000);
     } finally {
       setLoading(false);
@@ -134,8 +181,8 @@ export default function CompetitorsManagement({ org, initialCompetitors }: Compe
         </div>
       )}
 
-      {/* Add Competitor Form - only show if not at limit */}
-      {!isAtLimit ? (
+      {/* Add Competitor Form - only show if not at limit and user is admin */}
+      {!isAtLimit && isAdmin ? (
         <form onSubmit={handleAddCompetitor} className="flex gap-2">
           <input 
             value={newCompetitor.name}
@@ -166,11 +213,15 @@ export default function CompetitorsManagement({ org, initialCompetitors }: Compe
             {loading ? 'Adding...' : 'Add Competitor'}
           </Button>
         </form>
-      ) : (
+      ) : isAtLimit ? (
         <p className="text-sm text-amber-600">
           You've reached your plan limit of {org.max_competitors} competitors.
         </p>
-      )}
+      ) : !isAdmin ? (
+        <p className="text-sm text-gray-600">
+          Contact an admin to add competitors.
+        </p>
+      ) : null}
 
       {/* Competitors List */}
       {competitors.length === 0 ? (
@@ -208,13 +259,15 @@ export default function CompetitorsManagement({ org, initialCompetitors }: Compe
                     Run
                   </Button>
                 </form>
-                <Button 
-                  onClick={() => handleDeleteCompetitor(competitor.id)}
-                  disabled={loading}
-                  className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 text-sm"
-                >
-                  Delete
-                </Button>
+                {isAdmin && (
+                  <Button 
+                    onClick={() => handleDeleteCompetitor(competitor.id)}
+                    disabled={loading}
+                    className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 text-sm"
+                  >
+                    Delete
+                  </Button>
+                )}
               </div>
             </div>
           ))}

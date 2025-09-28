@@ -1,5 +1,6 @@
 import { auth, currentUser, clerkClient } from "@clerk/nextjs/server";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { DEFAULT_PRODUCT, normalizeUrl } from "./productDefaults";
 
 /**
  * Ensures a profile record exists for the given Clerk user ID.
@@ -205,4 +206,50 @@ export async function getActiveOrg() {
     clerkUserId, 
     clerkOrgId: clerkOrgId ?? null 
   };
+}
+
+/**
+ * Ensures an organization has default product values if they're empty.
+ * Idempotent - safe to call multiple times.
+ */
+export async function ensureOrgProductDefaults(supabase: any, orgId: string) {
+  // Read current
+  const { data: row, error } = await supabase
+    .from("orgs")
+    .select("product_name, product_website")
+    .eq("id", orgId)
+    .single();
+
+  if (error && error.code !== "PGRST116") { // 116 = no rows single()
+    console.warn("ensureOrgProductDefaults: read error", { orgId, error });
+  }
+
+  const currentName = row?.product_name?.trim();
+  const currentUrl  = normalizeUrl(row?.product_website);
+
+  const nextName = currentName && currentName.length > 0 ? currentName : DEFAULT_PRODUCT.name;
+  const nextUrl  = currentUrl  && currentUrl.length  > 0 ? currentUrl  : DEFAULT_PRODUCT.website;
+
+  // If both are already set, do nothing
+  if (currentName && currentUrl) return { updated: false };
+
+  // Upsert (insert if missing row, update if exists but empty)
+  const payload = {
+    product_name: nextName,
+    product_website: nextUrl,
+  };
+
+  const upsert = await supabase
+    .from("orgs")
+    .update(payload)
+    .eq("id", orgId)
+    .select("id")
+    .single();
+
+  if (upsert.error) {
+    console.error("ensureOrgProductDefaults: upsert error", { orgId, error: upsert.error, payload });
+    throw upsert.error;
+  }
+
+  return { updated: true };
 }

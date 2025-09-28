@@ -1,83 +1,225 @@
 import { auth } from '@clerk/nextjs/server';
 import { supabaseAdmin } from '@/server/supabaseAdmin';
 import { redirect } from 'next/navigation';
+import { ensureOrg } from '@/server/ensureOrg';
+import { resolveOrgContext } from '@/server/orgContext';
+import { ensureOrgProductDefaults } from '@/server/org';
 import OrganizationSettings from "@/components/OrganizationSettings";
+import TeamPanel from "./team-panel";
+import CompetitorsManagement from "@/components/CompetitorsManagement";
+import PlanCard from "./components/PlanCard";
+import ManageSubscription from "./components/ManageSubscription";
 
-export default async function Page() {
-  const { userId, orgId } = await auth();
+export default async function Page({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
+  // Get user role from server-side context (includes test mode support)
+  let userRole: 'admin' | 'member' = 'member';
+  let clerkOrgId: string | null = null;
+  let userId: string | null = null;
   
-  if (!userId) {
-    redirect('/sign-in');
-  }
-  
-  if (!orgId) {
-    redirect('/welcome');
+  try {
+    // Create a request with the current headers to pass cookies
+    const headers = new Headers();
+    // Copy all headers from the current request
+    if (typeof window === 'undefined') {
+      // Server-side: get headers from the request
+      const { headers: requestHeaders } = await import('next/headers');
+      const headersList = await requestHeaders();
+      headersList.forEach((value, key) => {
+        headers.set(key, value);
+      });
+    }
+    
+    const context = await resolveOrgContext(new Request('http://localhost:3000', { headers }));
+    userRole = context.role;
+    clerkOrgId = context.clerkOrgId;
+    userId = context.clerkUserId;
+  } catch (error) {
+    console.error('Failed to resolve user role:', error);
+    // Fallback to Clerk auth
+    const authResult = await auth();
+    userId = authResult.userId;
+    clerkOrgId = authResult.orgId;
+    
+    if (!userId) {
+      redirect('/sign-in');
+    }
+    
+    if (!clerkOrgId) {
+      redirect('/dashboard');
+    }
   }
 
-  // Get organization data using service role
+  // Get organization data using service role with maybeSingle for resilience
   const { data, error } = await supabaseAdmin
     .from("orgs")
     .select("id, name, product_name, product_website, plan_type, max_users, max_competitors")
-    .eq('clerk_org_id', orgId)
-    .single();
+    .eq('clerk_org_id', clerkOrgId)
+    .maybeSingle();
+    
+  // Ensure default product values if they're empty (idempotent & cheap)
+  if (data?.id) {
+    try { 
+      await ensureOrgProductDefaults(supabaseAdmin, data.id); 
+    } catch (e) { 
+      console.warn('Failed to ensure org product defaults:', e);
+    }
+  }
     
   if (error) {
     return (
       <div className="p-6">
         <h1 className="text-2xl font-semibold mb-4">Settings</h1>
-        <div className="text-red-600">
-          Error loading organization: {error.message}
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <h2 className="text-lg font-semibold text-red-800 mb-2">Error Loading Organization</h2>
+          <p className="text-red-700">{error.message}</p>
+          <p className="text-sm text-red-600 mt-2">
+            Please try refreshing the page or contact support if the issue persists.
+          </p>
         </div>
       </div>
     );
   }
-  
-  const org = data;
 
-  // Get competitors data
-  const { data: competitors, error: competitorsError } = await supabaseAdmin
+  // If no organization found, try to ensure it exists
+  if (!data) {
+    try {
+      console.log('Organization not found in database, attempting to ensure it exists...');
+      await ensureOrg({ clerkOrgId });
+      
+      // Re-fetch the organization data
+      const { data: retryData, error: retryError } = await supabaseAdmin
+        .from("orgs")
+        .select("id, name, product_name, product_website, plan_type, max_users, max_competitors")
+        .eq('clerk_org_id', clerkOrgId)
+        .single();
+        
+      if (retryError || !retryData) {
+        return (
+          <div className="p-6">
+            <h1 className="text-2xl font-semibold mb-4">Settings</h1>
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+              <h2 className="text-lg font-semibold text-yellow-800 mb-2">Organization Not Found</h2>
+              <p className="text-yellow-700 mb-4">
+                We couldn't find your organization in our database. This might happen if your organization was recently created or if there was a synchronization issue.
+              </p>
+              <div className="space-y-2">
+                <p className="text-sm text-yellow-600">
+                  Please try the following:
+                </p>
+                <ul className="text-sm text-yellow-600 list-disc list-inside space-y-1">
+                  <li>Refresh this page to retry the synchronization</li>
+                  <li>Go to the <a href="/dashboard" className="underline hover:text-yellow-800">Dashboard</a> to re-select your organization</li>
+                  <li>Contact support if the issue persists</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        );
+      }
+      
+      // Use the retried data
+      var org = retryData;
+    } catch (ensureError) {
+      console.error('Failed to ensure organization:', ensureError);
+      return (
+        <div className="p-6">
+          <h1 className="text-2xl font-semibold mb-4">Settings</h1>
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <h2 className="text-lg font-semibold text-red-800 mb-2">Synchronization Error</h2>
+            <p className="text-red-700 mb-4">
+              We encountered an error while trying to synchronize your organization data.
+            </p>
+            <div className="space-y-2">
+              <p className="text-sm text-red-600">
+                Please try the following:
+              </p>
+              <ul className="text-sm text-red-600 list-disc list-inside space-y-1">
+                <li>Refresh this page to retry</li>
+                <li>Go to the <a href="/dashboard" className="underline hover:text-red-800">Dashboard</a> to re-select your organization</li>
+                <li>Contact support if the issue persists</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      );
+    }
+  } else {
+    var org = data;
+  }
+
+  // Get user's role in the org
+  const { data: membership } = await supabaseAdmin
+    .from('org_memberships')
+    .select('role')
+    .eq('clerk_org_id', clerkOrgId)
+    .eq('clerk_user_id', userId)
+    .single();
+
+  const isAdmin = membership?.role === 'admin';
+
+  // Get competitors count for plan display
+  const { data: competitorsCount, error: competitorsError } = await supabaseAdmin
     .from('competitors')
-    .select('id, name, website, slug, active, aliases')
+    .select('id', { count: 'exact', head: true })
     .eq('org_id', org.id)
-    .eq('active', true)
-    .order('created_at', { ascending: false });
+    .eq('active', true);
 
   if (competitorsError) {
-    return (
-      <div className="p-6">
-        <h1 className="text-2xl font-semibold mb-4">Settings</h1>
-        <div className="text-red-600">
-          Error loading competitors: {competitorsError.message}
-        </div>
-      </div>
-    );
+    console.error('Error loading competitors count:', competitorsError);
   }
 
+  const tab = (await searchParams)?.tab ?? 'general';
+
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-8">
       <h1 className="text-2xl font-semibold">Settings</h1>
       
-      {/* Organization Card */}
-      <OrganizationSettings org={org} competitors={competitors || []} />
+      <div className="flex gap-4 border-b pb-2">
+        <a href="/settings?tab=general" className={tab==='general' ? 'font-semibold' : ''}>General</a>
+        <a href="/settings?tab=competitors" className={tab==='competitors' ? 'font-semibold' : ''}>Competitors</a>
+        <a href="/settings?tab=team" className={tab==='team' ? 'font-semibold' : ''}>Team</a>
+      </div>
+
+      {tab === 'general' && (
+        <>
+          {/* Plan Card */}
+          <PlanCard
+            orgName={org.name}
+            planType={org.plan_type}
+            maxUsers={org.max_users}
+            maxCompetitors={org.max_competitors}
+            competitorsUsed={competitorsCount?.length ? competitorsCount.length : competitorsCount?.count ?? 0}
+          />
+          
+          {/* Organization Card - Product Information */}
+          <OrganizationSettings org={org} competitors={[]} isAdmin={isAdmin} />
+          
+          {/* Manage Subscription */}
+          <ManageSubscription />
+        </>
+      )}
       
-      {/* Plan Information Card */}
-      {org && (
-        <div className="rounded border p-4
-               bg-white border-df-lightBorder
-               dark:bg-[var(--df-dark-card)] dark:border-[var(--df-dark-border)]">
-          <h2 className="text-lg font-semibold mb-3">Plan Information</h2>
-          <ul className="text-sm space-y-2">
-            <li><span className="font-medium">Org:</span> {org.name}</li>
-            <li><span className="font-medium">Plan:</span> {org.plan_type}</li>
-            <li><span className="font-medium">Max users:</span> {org.max_users}</li>
-            <li><span className="font-medium">Max competitors:</span> {org.max_competitors}</li>
-          </ul>
+      {tab === 'competitors' && (
+        <div className="space-y-6">
+          <div>
+            <h2 className="text-lg font-semibold mb-2">Manage Competitors</h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              {isAdmin 
+                ? "Add, edit, or remove competitors to track in your analyses."
+                : "View your organization's competitors. Contact an admin to make changes."
+              }
+            </p>
+          </div>
+          
+          <CompetitorsManagement 
+            org={org} 
+            initialCompetitors={competitors || []} 
+            isAdmin={isAdmin}
+          />
         </div>
       )}
       
-      <div className="text-sm text-gray-500 dark:text-[var(--df-dark-muted)]">
-        Invites & billing – placeholders for now.
-      </div>
+      {tab === 'team' && <TeamPanel role={userRole} />}
     </div>
   );
 }

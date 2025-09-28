@@ -24,7 +24,7 @@ function WhoamiContent() {
   useEffect(() => {
     async function fetchWhoami() {
       try {
-        const response = await fetch('/api/diag/whoami', {
+        const response = await fetch('/api/debug/whoami', {
           cache: 'no-store'
         });
 

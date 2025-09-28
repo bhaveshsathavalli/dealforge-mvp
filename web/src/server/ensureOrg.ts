@@ -1,38 +1,117 @@
-import { cookies } from "next/headers";
-import { createClient } from "@supabase/supabase-js";
-import { auth, clerkClient, Organization } from "@clerk/nextjs/server";
+import "server-only";
+import { auth, currentUser, createClerkClient } from "@clerk/nextjs/server";
+import { supabaseAdmin } from "./supabaseAdmin";
 
-type OrgRow = { id: string; name: string | null; clerk_org_id: string | null; slug: string | null };
-
-function admin() {
-  // Admin client (service role); RLS bypass for controlled server writes.
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
-    global: { headers: { "X-Client-Info": "geo-admin" } },
-  });
+export interface EnsureOrgInput {
+  clerkOrgId: string;
+  name?: string;
+  slug?: string;
 }
 
-export async function ensureDbOrg(): Promise<{ dbOrgId: string; clerkOrgId: string }> {
-  const { orgId: clerkOrgId } = auth();
-  if (!clerkOrgId) throw new Error("No active Clerk org. Switch or create an organization.");
+export interface EnsureOrgResult {
+  orgId: string;
+  role: string;
+}
 
-  const sb = admin();
-  // 1) Try to find existing org row mapped to Clerk
-  let { data: found, error } = await sb.from("orgs").select("id,name,clerk_org_id,slug").eq("clerk_org_id", clerkOrgId).maybeSingle();
-  if (error) throw error;
+/**
+ * Ensures an organization exists in Supabase and mirrors user data.
+ * Idempotent - safe to call multiple times.
+ */
+export async function ensureOrg(input: EnsureOrgInput): Promise<EnsureOrgResult> {
+  const { clerkOrgId, name: inputName, slug: inputSlug } = input;
+  
+  try {
+    // Get current user info from Clerk
+    const { userId: clerkUserId } = await auth();
+    if (!clerkUserId) {
+      throw new Error("User not authenticated");
+    }
 
-  if (found?.id) return { dbOrgId: found.id, clerkOrgId };
+    // Get user details from Clerk
+    const user = await currentUser();
+    const email = user?.emailAddresses?.[0]?.emailAddress;
+    const fullName = user?.fullName;
+    const imageUrl = user?.imageUrl;
 
-  // 2) Create one if missing (pull name/slug from Clerk)
-  const org: Organization = await clerkClient.organizations.getOrganization({ organizationId: clerkOrgId });
-  const name = org.name ?? "New Org";
-  const slug = (org.slug ?? name.toLowerCase().replace(/[^a-z0-9]+/g, "-")).slice(0, 50);
+    // Create Clerk client
+    const clerkClient = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
 
-  const { data: created, error: insertErr } = await sb
-    .from("orgs")
-    .insert({ name, slug, clerk_org_id: clerkOrgId })
-    .select("id")
-    .single();
-  if (insertErr) throw insertErr;
+    // Get organization details from Clerk
+    const org = await clerkClient.organizations.getOrganization({ 
+      organizationId: clerkOrgId 
+    });
 
-  return { dbOrgId: created.id, clerkOrgId };
+    // Get user's role in the organization
+    let role = 'member';
+    try {
+      const memberships = await clerkClient.organizations.getOrganizationMembershipList({
+        organizationId: clerkOrgId,
+      });
+      const userMembership = memberships.data.find(m => m.publicUserData?.userId === clerkUserId);
+      role = userMembership?.role || 'member';
+    } catch (error) {
+      console.warn('Failed to get membership role, defaulting to member:', error);
+    }
+
+    // Upsert organization
+    const { data: orgData, error: orgError } = await supabaseAdmin
+      .from('orgs')
+      .upsert({
+        clerk_org_id: clerkOrgId,
+        name: inputName || org.name,
+        slug: inputSlug || org.slug,
+        updated_at: new Date().toISOString()
+      }, {
+        onConflict: 'clerk_org_id'
+      })
+      .select('id')
+      .single();
+
+    if (orgError) {
+      throw new Error(`Failed to upsert organization: ${orgError.message}`);
+    }
+
+    // Upsert user profile
+    const { error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .upsert({
+        clerk_user_id: clerkUserId,
+        email: email,
+        name: fullName,
+        image_url: imageUrl,
+        last_active_org_id: orgData.id,
+        updated_at: new Date().toISOString()
+      }, {
+        onConflict: 'clerk_user_id'
+      });
+
+    if (profileError) {
+      throw new Error(`Failed to upsert profile: ${profileError.message}`);
+    }
+
+    // Upsert organization membership
+    const { error: membershipError } = await supabaseAdmin
+      .from('org_memberships')
+      .upsert({
+        clerk_org_id: clerkOrgId,
+        clerk_user_id: clerkUserId,
+        role: role,
+        updated_at: new Date().toISOString()
+      }, {
+        onConflict: 'clerk_org_id,clerk_user_id'
+      });
+
+    if (membershipError) {
+      throw new Error(`Failed to upsert membership: ${membershipError.message}`);
+    }
+
+    return {
+      orgId: orgData.id,
+      role: role
+    };
+
+  } catch (error) {
+    console.error('Error in ensureOrg:', error);
+    throw error;
+  }
 }
