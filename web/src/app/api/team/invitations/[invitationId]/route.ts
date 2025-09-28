@@ -1,63 +1,62 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
 import { clerkClient } from '@clerk/nextjs/server';
+import { resolveOrgContext } from '@/server/orgContext';
 
 export async function DELETE(
   req: Request,
   { params }: { params: { invitationId: string } }
 ) {
   try {
-    const { userId, orgId, sessionClaims } = await auth();
+    console.log('invites.clerk', JSON.stringify({ 
+      evt: 'invite_revoke_start', 
+      invitationId: params.invitationId 
+    }));
     
-    if (!userId) {
+    // Get org context
+    const ctx = await resolveOrgContext();
+    
+    if (!ctx.ok) {
       return NextResponse.json({
         ok: false,
-        error: { code: 'UNAUTHENTICATED', message: 'Not authenticated' }
+        error: { 
+          code: ctx.reason === 'UNAUTHENTICATED' ? 'UNAUTHENTICATED' : 'AUTH_ERROR',
+          message: ctx.reason === 'UNAUTHENTICATED' ? 'Not authenticated' : 'Authentication failed'
+        }
       }, { status: 401 });
     }
 
-    if (!orgId) {
+    if (!ctx.orgId) {
       return NextResponse.json({
         ok: false,
         error: { code: 'NO_ORG', message: 'No organization selected' }
       }, { status: 400 });
     }
 
-    // Check if user is admin - FIX: Use proper role resolution
-    let userRole = sessionClaims?.org_role as string;
-    if (!userRole) {
-      const memberships = await clerkClient.organizations.getOrganizationMembershipList({
-        organizationId: orgId,
-        limit: 100
-      });
-      const me = memberships.data.find(m => m.publicUserData?.userId === userId);
-      userRole = me?.role || null;
-    }
-    
-    if (userRole !== 'org:admin' && userRole !== 'admin') {
+    if (ctx.role !== 'admin') {
       return NextResponse.json({
         ok: false,
-        error: { code: 'FORBIDDEN', message: 'Admin access required' }
+        error: { code: 'ADMIN_REQUIRED', message: 'Admin access required' }
       }, { status: 403 });
     }
 
     const { invitationId } = params;
 
-    console.info('team.api', JSON.stringify({
-      route: 'DELETE /api/team/invitations/:invitationId',
-      evt: 'start',
-      orgId,
-      userId,
+    console.log('invites.clerk', JSON.stringify({
+      evt: 'invite_revoke_calling_clerk',
+      orgId: ctx.orgId,
+      userId: ctx.userId,
       invitationId
     }));
 
-    await clerkClient.organizations.revokeOrganizationInvitation(invitationId);
+    await clerkClient.organizations.revokeOrganizationInvitation({
+      organizationId: ctx.orgId,
+      invitationId
+    });
 
-    console.info('team.api', JSON.stringify({
-      route: 'DELETE /api/team/invitations/:invitationId',
-      evt: 'success',
-      orgId,
-      userId,
+    console.log('invites.clerk', JSON.stringify({
+      evt: 'invite_revoke_success',
+      orgId: ctx.orgId,
+      userId: ctx.userId,
       invitationId
     }));
 
@@ -67,24 +66,19 @@ export async function DELETE(
     });
 
   } catch (error: any) {
-    const clerkError = error?.errors?.[0];
-    
-    console.error('team.api', JSON.stringify({
-      route: 'DELETE /api/team/invitations/:invitationId',
-      evt: 'error',
-      orgId: (await auth()).orgId,
-      userId: (await auth()).userId,
-      invitationId: params.invitationId,
-      code: clerkError?.code,
-      message: clerkError?.message,
-      raw: error.message
+    console.error('invites.clerk', JSON.stringify({
+      evt: 'invite_revoke_error',
+      error: error.message,
+      code: error?.errors?.[0]?.code,
+      where: 'DELETE /api/team/invitations/[invitationId]',
+      invitationId: params.invitationId
     }));
 
     return NextResponse.json({
       ok: false,
       error: { 
-        code: clerkError?.code || 'CLERK_ERROR', 
-        message: clerkError?.message || 'Failed to cancel invitation'
+        code: error?.errors?.[0]?.code || 'CLERK_ERROR', 
+        message: error?.errors?.[0]?.message || 'Failed to cancel invitation'
       }
     }, { status: 500 });
   }

@@ -1,58 +1,52 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
 import { clerkClient } from '@clerk/nextjs/server';
 import { z } from 'zod';
+import { resolveOrgContext } from '@/server/orgContext';
 
 const inviteSchema = z.object({
   email: z.string().email('Invalid email address'),
-  role: z.enum(['org:member', 'org:admin']).optional().default('org:member'),
+  role: z.enum(['member', 'admin']).optional().default('member'),
 });
 
 export async function GET(req: Request) {
   try {
-    const { userId, orgId, sessionClaims } = await auth();
+    console.log('invites.clerk', JSON.stringify({ evt: 'invitations_list_start' }));
     
-    if (!userId) {
+    // Get org context
+    const ctx = await resolveOrgContext();
+    
+    if (!ctx.ok) {
       return NextResponse.json({
         ok: false,
-        error: { code: 'UNAUTHENTICATED', message: 'Not authenticated' }
+        error: { 
+          code: ctx.reason === 'UNAUTHENTICATED' ? 'UNAUTHENTICATED' : 'AUTH_ERROR',
+          message: ctx.reason === 'UNAUTHENTICATED' ? 'Not authenticated' : 'Authentication failed'
+        }
       }, { status: 401 });
     }
 
-    if (!orgId) {
+    if (!ctx.orgId) {
       return NextResponse.json({
         ok: false,
         error: { code: 'NO_ORG', message: 'No organization selected' }
       }, { status: 400 });
     }
 
-    // Check if user is admin - FIX: Use proper role resolution
-    let userRole = sessionClaims?.org_role as string;
-    if (!userRole) {
-      const memberships = await clerkClient.organizations.getOrganizationMembershipList({
-        organizationId: orgId,
-        limit: 100
-      });
-      const me = memberships.data.find(m => m.publicUserData?.userId === userId);
-      userRole = me?.role || null;
-    }
-    
-    if (userRole !== 'org:admin' && userRole !== 'admin') {
+    if (ctx.role !== 'admin') {
       return NextResponse.json({
         ok: false,
-        error: { code: 'FORBIDDEN', message: 'Admin access required' }
+        error: { code: 'ADMIN_REQUIRED', message: 'Admin access required' }
       }, { status: 403 });
     }
 
-    console.info('team.api', JSON.stringify({
-      route: 'GET /api/team/invitations',
-      evt: 'start',
-      orgId,
-      userId
+    console.log('invites.clerk', JSON.stringify({
+      evt: 'invitations_list_fetching',
+      orgId: ctx.orgId,
+      userId: ctx.userId
     }));
 
     const invitations = await clerkClient.organizations.getOrganizationInvitationList({
-      organizationId: orgId
+      organizationId: ctx.orgId
     });
 
     const formattedInvitations = invitations.data.map(invitation => ({
@@ -64,11 +58,10 @@ export async function GET(req: Request) {
       updatedAt: invitation.updatedAt
     }));
 
-    console.info('team.api', JSON.stringify({
-      route: 'GET /api/team/invitations',
-      evt: 'success',
-      orgId,
-      userId,
+    console.log('invites.clerk', JSON.stringify({
+      evt: 'invitations_list_success',
+      orgId: ctx.orgId,
+      userId: ctx.userId,
       count: formattedInvitations.length
     }));
 
@@ -78,23 +71,18 @@ export async function GET(req: Request) {
     });
 
   } catch (error: any) {
-    const clerkError = error?.errors?.[0];
-    
-    console.error('team.api', JSON.stringify({
-      route: 'GET /api/team/invitations',
-      evt: 'error',
-      orgId: (await auth()).orgId,
-      userId: (await auth()).userId,
-      code: clerkError?.code,
-      message: clerkError?.message,
-      raw: error.message
+    console.error('invites.clerk', JSON.stringify({
+      evt: 'invitations_list_error',
+      error: error.message,
+      code: error?.errors?.[0]?.code,
+      where: 'GET /api/team/invitations'
     }));
 
     return NextResponse.json({
       ok: false,
       error: { 
-        code: clerkError?.code || 'CLERK_ERROR', 
-        message: clerkError?.message || 'Failed to fetch invitations'
+        code: error?.errors?.[0]?.code || 'CLERK_ERROR', 
+        message: error?.errors?.[0]?.message || 'Failed to fetch invitations'
       }
     }, { status: 500 });
   }
@@ -102,37 +90,32 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const { userId, orgId, sessionClaims } = await auth();
+    console.log('invites.clerk', JSON.stringify({ evt: 'invite_create_start' }));
     
-    if (!userId) {
+    // Get org context
+    const ctx = await resolveOrgContext();
+    
+    if (!ctx.ok) {
       return NextResponse.json({
         ok: false,
-        error: { code: 'UNAUTHENTICATED', message: 'Not authenticated' }
+        error: { 
+          code: ctx.reason === 'UNAUTHENTICATED' ? 'UNAUTHENTICATED' : 'AUTH_ERROR',
+          message: ctx.reason === 'UNAUTHENTICATED' ? 'Not authenticated' : 'Authentication failed'
+        }
       }, { status: 401 });
     }
 
-    if (!orgId) {
+    if (!ctx.orgId) {
       return NextResponse.json({
         ok: false,
         error: { code: 'NO_ORG', message: 'No organization selected' }
       }, { status: 400 });
     }
 
-    // Check if user is admin - FIX: Use proper role resolution
-    let userRole = sessionClaims?.org_role as string;
-    if (!userRole) {
-      const memberships = await clerkClient.organizations.getOrganizationMembershipList({
-        organizationId: orgId,
-        limit: 100
-      });
-      const me = memberships.data.find(m => m.publicUserData?.userId === userId);
-      userRole = me?.role || null;
-    }
-    
-    if (userRole !== 'org:admin' && userRole !== 'admin') {
+    if (ctx.role !== 'admin') {
       return NextResponse.json({
         ok: false,
-        error: { code: 'FORBIDDEN', message: 'Admin access required' }
+        error: { code: 'ADMIN_REQUIRED', message: 'Admin access required' }
       }, { status: 403 });
     }
 
@@ -142,32 +125,34 @@ export async function POST(req: Request) {
     if (!validation.success) {
       return NextResponse.json({
         ok: false,
-        error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: validation.error.errors }
+        error: { 
+          code: 'VALIDATION_ERROR', 
+          message: 'Invalid input', 
+          details: validation.error.errors 
+        }
       }, { status: 400 });
     }
 
     const { email, role } = validation.data;
 
-    console.info('team.api', JSON.stringify({
-      route: 'POST /api/team/invitations',
-      evt: 'start',
-      orgId,
-      userId,
+    console.log('invites.clerk', JSON.stringify({
+      evt: 'invite_create_calling_clerk',
+      orgId: ctx.orgId,
+      userId: ctx.userId,
       email,
       role
     }));
 
     const invitation = await clerkClient.organizations.createOrganizationInvitation({
-      organizationId: orgId,
+      organizationId: ctx.orgId,
       emailAddress: email,
-      role
+      role: role === 'admin' ? 'org:admin' : 'org:member'
     });
 
-    console.info('team.api', JSON.stringify({
-      route: 'POST /api/team/invitations',
-      evt: 'success',
-      orgId,
-      userId,
+    console.log('invites.clerk', JSON.stringify({
+      evt: 'invite_create_success',
+      orgId: ctx.orgId,
+      userId: ctx.userId,
       email,
       role,
       invitationId: invitation.id
@@ -176,35 +161,25 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: true,
       data: { 
-        invitation: {
-          id: invitation.id,
-          emailAddress: invitation.emailAddress,
-          role: invitation.role,
-          status: invitation.status,
-          createdAt: invitation.createdAt,
-          updatedAt: invitation.updatedAt
-        }
+        invitationId: invitation.id,
+        email: invitation.emailAddress,
+        role: invitation.role
       }
     });
 
   } catch (error: any) {
-    const clerkError = error?.errors?.[0];
-    
-    console.error('team.api', JSON.stringify({
-      route: 'POST /api/team/invitations',
-      evt: 'error',
-      orgId: (await auth()).orgId,
-      userId: (await auth()).userId,
-      code: clerkError?.code,
-      message: clerkError?.message,
-      raw: error.message
+    console.error('invites.clerk', JSON.stringify({
+      evt: 'invite_create_error',
+      error: error.message,
+      code: error?.errors?.[0]?.code,
+      where: 'POST /api/team/invitations'
     }));
 
     return NextResponse.json({
       ok: false,
       error: { 
-        code: clerkError?.code || 'CLERK_ERROR', 
-        message: clerkError?.message || 'Failed to create invitation'
+        code: error?.errors?.[0]?.code || 'CLERK_ERROR', 
+        message: error?.errors?.[0]?.message || 'Failed to create invitation'
       }
     }, { status: 500 });
   }

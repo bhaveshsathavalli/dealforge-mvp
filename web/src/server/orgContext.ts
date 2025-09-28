@@ -1,168 +1,164 @@
 import { auth } from '@clerk/nextjs/server';
-import { createClerkClient } from '@clerk/nextjs/server';
-import { supabaseAdmin } from './supabaseAdmin';
+import { clerkClient } from '@clerk/nextjs/server';
 
-export type Role = 'admin' | 'member';
-export type OrgContext = { 
-  clerkUserId: string; 
-  clerkOrgId: string; 
-  role: Role;
-  orgId?: string; // Supabase internal org UUID
+export type OrgContext = {
+  ok: boolean;
+  userId?: string;
+  orgId?: string;
+  role?: 'admin' | 'member';
+  reason?: string;
+  clerkCode?: string;
+  clerkMessage?: string;
 };
 
-export class OrgContextError extends Error {
-  constructor(
-    message: string,
-    public code: 'UNAUTHENTICATED' | 'NO_ORG' | 'NO_MEMBERSHIP' | 'DB_ERROR'
-  ) {
-    super(message);
-    this.name = 'OrgContextError';
-  }
-}
-
-function normalizeRole(role?: string): Role {
+function normalizeRole(role?: string): 'admin' | 'member' {
   if (!role) return 'member';
-  const v = role.toLowerCase();
-  if (v.includes('admin')) return 'admin';
+  const normalized = role.toLowerCase();
+  if (normalized.includes('admin')) return 'admin';
   return 'member';
 }
 
-export async function resolveOrgContext(req: Request): Promise<OrgContext> {
+export async function resolveOrgContext(): Promise<OrgContext> {
   try {
-    // Check for test mode cookies first
-    const cookieHeader = req.headers.get('cookie');
-    const testUserId = cookieHeader?.match(/TEST_CLERK_USER=([^;]+)/)?.[1];
-    const testOrgId = cookieHeader?.match(/TEST_CLERK_ORG=([^;]+)/)?.[1];
+    console.log('org.ctx', JSON.stringify({ evt: 'start' }));
     
-    console.log('team.debug', JSON.stringify({
-      evt: 'test_cookie_parsing',
-      cookieHeader,
-      testUserId,
-      testOrgId
+    // Step 1: Get basic auth info
+    const { userId, orgId, sessionClaims } = await auth();
+    
+    if (!userId) {
+      console.log('org.ctx', JSON.stringify({ evt: 'no_user' }));
+      return { ok: false, reason: 'UNAUTHENTICATED' };
+    }
+
+    console.log('org.ctx', JSON.stringify({ 
+      evt: 'auth_ok', 
+      userId, 
+      orgId, 
+      hasSessionClaims: !!sessionClaims 
     }));
+
+    // Step 2: Try to derive role from sessionClaims first
+    let role: 'admin' | 'member' | undefined;
     
-    if (testUserId && testOrgId) {
-      // Test mode - get role from database
-      const { data: membership, error: membershipError } = await supabaseAdmin
-        .from('org_memberships')
-        .select('role')
-        .eq('clerk_org_id', testOrgId)
-        .eq('clerk_user_id', testUserId)
-        .single();
-      
-      console.log('team.debug', JSON.stringify({
-        evt: 'test_membership_query',
-        testUserId,
-        testOrgId,
-        membership,
-        membershipError
+    if (sessionClaims?.org_role) {
+      role = normalizeRole(sessionClaims.org_role as string);
+      console.log('org.ctx', JSON.stringify({ 
+        evt: 'role_from_session', 
+        rawRole: sessionClaims.org_role, 
+        normalizedRole: role 
       }));
-      
-      if (!membership) {
-        throw new OrgContextError('No membership found for test user', 'NO_MEMBERSHIP');
-      }
-      
-      return {
-        clerkUserId: testUserId,
-        clerkOrgId: testOrgId,
-        role: membership.role === 'admin' ? 'admin' : 'member'
-      };
     }
-    
-    // Production mode - use Clerk
-    const { userId: clerkUserId, orgId: clerkOrgId } = await auth();
-    
-    if (!clerkUserId) {
-      throw new OrgContextError('Not authenticated', 'UNAUTHENTICATED');
-    }
-    
-    if (!clerkOrgId) {
-      throw new OrgContextError('No organization selected', 'NO_ORG');
-    }
-    
-    // Get role from org_memberships (source of truth)
-    const { data: membership, error: membershipError } = await supabaseAdmin
-      .from('org_memberships')
-      .select('role')
-      .eq('clerk_org_id', clerkOrgId)
-      .eq('clerk_user_id', clerkUserId)
-      .single();
-    
-    if (membershipError || !membership) {
-      // Fallback to Clerk API if not in our DB
-      const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
-      
+
+    // Step 3: If no role from sessionClaims, fetch from Clerk
+    if (!role && orgId) {
       try {
-        const mems = await clerk.users.getOrganizationMembershipList({
-          userId: clerkUserId,
-          organizationId: clerkOrgId,
-          limit: 1
+        console.log('org.ctx', JSON.stringify({ evt: 'fetching_memberships', orgId }));
+        
+        const memberships = await clerkClient.organizations.getOrganizationMembershipList({
+          organizationId: orgId,
+          limit: 100
         });
         
-        if (mems.data && mems.data.length > 0) {
-          const clerkRole = normalizeRole(mems.data[0].role);
+        const me = memberships.data.find(m => m.publicUserData?.userId === userId);
+        if (me) {
+          role = normalizeRole(me.role);
+          console.log('org.ctx', JSON.stringify({ 
+            evt: 'role_from_membership', 
+            rawRole: me.role, 
+            normalizedRole: role 
+          }));
+        }
+      } catch (clerkError: any) {
+        console.error('org.ctx', JSON.stringify({ 
+          evt: 'membership_lookup_failed', 
+          error: clerkError.message,
+          code: clerkError?.errors?.[0]?.code 
+        }));
+        
+        return { 
+          ok: false, 
+          reason: 'LOOKUP_FAILED', 
+          clerkCode: clerkError?.errors?.[0]?.code,
+          clerkMessage: clerkError.message 
+        };
+      }
+    }
+
+    // Step 4: If still no role and no orgId, try user's memberships
+    if (!role && !orgId) {
+      try {
+        console.log('org.ctx', JSON.stringify({ evt: 'fetching_user_memberships', userId }));
+        
+        const userMemberships = await clerkClient.users.getOrganizationMembershipList({
+          userId,
+          limit: 10
+        });
+        
+        const activeMembership = userMemberships.data.find(m => m.organization?.id) || userMemberships.data[0];
+        if (activeMembership) {
+          role = normalizeRole(activeMembership.role);
+          const foundOrgId = activeMembership.organization?.id;
           
-          // Upsert into our DB for consistency
-          await supabaseAdmin.from('org_memberships').upsert({
-            clerk_user_id: clerkUserId,
-            clerk_org_id: clerkOrgId,
-            role: clerkRole,
-            updated_at: new Date().toISOString()
-          }, { onConflict: 'clerk_user_id,clerk_org_id' });
+          console.log('org.ctx', JSON.stringify({ 
+            evt: 'role_from_user_membership', 
+            rawRole: activeMembership.role, 
+            normalizedRole: role,
+            foundOrgId 
+          }));
           
-          return {
-            clerkUserId,
-            clerkOrgId,
-            role: clerkRole
+          return { 
+            ok: true, 
+            userId, 
+            orgId: foundOrgId, 
+            role 
           };
         }
-      } catch (clerkError) {
-        console.error('team.debug', JSON.stringify({
-          evt: 'clerk_fallback_failed',
-          clerkUserId,
-          clerkOrgId,
-          error: clerkError instanceof Error ? clerkError.message : 'Unknown error'
+      } catch (clerkError: any) {
+        console.error('org.ctx', JSON.stringify({ 
+          evt: 'user_membership_lookup_failed', 
+          error: clerkError.message,
+          code: clerkError?.errors?.[0]?.code 
         }));
+        
+        return { 
+          ok: false, 
+          reason: 'LOOKUP_FAILED', 
+          clerkCode: clerkError?.errors?.[0]?.code,
+          clerkMessage: clerkError.message 
+        };
       }
-      
-      throw new OrgContextError('No membership found', 'NO_MEMBERSHIP');
     }
-    
-    // Get Supabase orgId for completeness
-    const { data: orgData } = await supabaseAdmin
-      .from('orgs')
-      .select('id')
-      .eq('clerk_org_id', clerkOrgId)
-      .single();
-    
-    const context = {
-      clerkUserId,
-      clerkOrgId,
-      role: membership.role === 'admin' ? 'admin' : 'member',
-      orgId: orgData?.id
+
+    // Step 5: Return result
+    if (!role) {
+      console.log('org.ctx', JSON.stringify({ evt: 'no_role_found' }));
+      return { ok: false, reason: 'NO_ROLE' };
+    }
+
+    const result = { 
+      ok: true, 
+      userId, 
+      orgId, 
+      role 
     };
-
-    // Log context for debugging
-    console.info('invites.clerk', JSON.stringify({
-      evt: 'ctx',
-      userId: context.clerkUserId,
-      orgId: context.clerkOrgId,
-      role: context.role,
-      supabaseOrgId: context.orgId
-    }));
-
-    return context;
     
-  } catch (error) {
-    if (error instanceof OrgContextError) {
-      throw error;
-    }
-    
-    console.error('team.debug', JSON.stringify({
-      evt: 'resolve_org_context_error',
-      error: error instanceof Error ? error.message : 'Unknown error'
+    console.log('org.ctx', JSON.stringify({ 
+      evt: 'success', 
+      ...result 
     }));
     
-    throw new OrgContextError('Failed to resolve org context', 'DB_ERROR');
+    return result;
+
+  } catch (error: any) {
+    console.error('org.ctx', JSON.stringify({ 
+      evt: 'fatal_error', 
+      error: error.message 
+    }));
+    
+    return { 
+      ok: false, 
+      reason: 'FATAL_ERROR', 
+      clerkMessage: error.message 
+    };
   }
 }

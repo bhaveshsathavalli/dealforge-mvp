@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
 import { clerkClient } from '@clerk/nextjs/server';
 import { z } from 'zod';
+import { resolveOrgContext } from '@/server/orgContext';
 
 const updateRoleSchema = z.object({
   role: z.enum(['org:admin', 'org:member'])
@@ -12,37 +12,35 @@ export async function PATCH(
   { params }: { params: { membershipId: string } }
 ) {
   try {
-    const { userId, orgId, sessionClaims } = await auth();
+    console.log('invites.clerk', JSON.stringify({ 
+      evt: 'member_update_start', 
+      membershipId: params.membershipId 
+    }));
     
-    if (!userId) {
+    // Get org context
+    const ctx = await resolveOrgContext();
+    
+    if (!ctx.ok) {
       return NextResponse.json({
         ok: false,
-        error: { code: 'UNAUTHENTICATED', message: 'Not authenticated' }
+        error: { 
+          code: ctx.reason === 'UNAUTHENTICATED' ? 'UNAUTHENTICATED' : 'AUTH_ERROR',
+          message: ctx.reason === 'UNAUTHENTICATED' ? 'Not authenticated' : 'Authentication failed'
+        }
       }, { status: 401 });
     }
 
-    if (!orgId) {
+    if (!ctx.orgId) {
       return NextResponse.json({
         ok: false,
         error: { code: 'NO_ORG', message: 'No organization selected' }
       }, { status: 400 });
     }
 
-    // Check if user is admin - FIX: Use proper role resolution
-    let userRole = sessionClaims?.org_role as string;
-    if (!userRole) {
-      const memberships = await clerkClient.organizations.getOrganizationMembershipList({
-        organizationId: orgId,
-        limit: 100
-      });
-      const me = memberships.data.find(m => m.publicUserData?.userId === userId);
-      userRole = me?.role || null;
-    }
-    
-    if (userRole !== 'org:admin' && userRole !== 'admin') {
+    if (ctx.role !== 'admin') {
       return NextResponse.json({
         ok: false,
-        error: { code: 'FORBIDDEN', message: 'Admin access required' }
+        error: { code: 'ADMIN_REQUIRED', message: 'Admin access required' }
       }, { status: 403 });
     }
 
@@ -52,29 +50,35 @@ export async function PATCH(
     if (!validation.success) {
       return NextResponse.json({
         ok: false,
-        error: { code: 'VALIDATION_ERROR', message: 'Invalid role', details: validation.error.errors }
+        error: { 
+          code: 'VALIDATION_ERROR', 
+          message: 'Invalid role', 
+          details: validation.error.errors 
+        }
       }, { status: 400 });
     }
 
     const { role } = validation.data;
     const { membershipId } = params;
 
-    console.info('team.api', JSON.stringify({
-      route: 'PATCH /api/team/members/:membershipId',
-      evt: 'start',
-      orgId,
-      userId,
+    console.log('invites.clerk', JSON.stringify({
+      evt: 'member_update_calling_clerk',
+      orgId: ctx.orgId,
+      userId: ctx.userId,
       membershipId,
       newRole: role
     }));
 
-    await clerkClient.organizations.updateOrganizationMembership(membershipId, { role });
+    await clerkClient.organizations.updateOrganizationMembership({
+      organizationId: ctx.orgId,
+      membershipId,
+      role
+    });
 
-    console.info('team.api', JSON.stringify({
-      route: 'PATCH /api/team/members/:membershipId',
-      evt: 'success',
-      orgId,
-      userId,
+    console.log('invites.clerk', JSON.stringify({
+      evt: 'member_update_success',
+      orgId: ctx.orgId,
+      userId: ctx.userId,
       membershipId,
       newRole: role
     }));
@@ -85,24 +89,19 @@ export async function PATCH(
     });
 
   } catch (error: any) {
-    const clerkError = error?.errors?.[0];
-    
-    console.error('team.api', JSON.stringify({
-      route: 'PATCH /api/team/members/:membershipId',
-      evt: 'error',
-      orgId: (await auth()).orgId,
-      userId: (await auth()).userId,
-      membershipId: params.membershipId,
-      code: clerkError?.code,
-      message: clerkError?.message,
-      raw: error.message
+    console.error('invites.clerk', JSON.stringify({
+      evt: 'member_update_error',
+      error: error.message,
+      code: error?.errors?.[0]?.code,
+      where: 'PATCH /api/team/members/[membershipId]',
+      membershipId: params.membershipId
     }));
 
     return NextResponse.json({
       ok: false,
       error: { 
-        code: clerkError?.code || 'CLERK_ERROR', 
-        message: clerkError?.message || 'Failed to update member role'
+        code: error?.errors?.[0]?.code || 'CLERK_ERROR', 
+        message: error?.errors?.[0]?.message || 'Failed to update member role'
       }
     }, { status: 500 });
   }
@@ -113,57 +112,56 @@ export async function DELETE(
   { params }: { params: { membershipId: string } }
 ) {
   try {
-    const { userId, orgId, sessionClaims } = await auth();
+    console.log('invites.clerk', JSON.stringify({ 
+      evt: 'member_delete_start', 
+      membershipId: params.membershipId 
+    }));
     
-    if (!userId) {
+    // Get org context
+    const ctx = await resolveOrgContext();
+    
+    if (!ctx.ok) {
       return NextResponse.json({
         ok: false,
-        error: { code: 'UNAUTHENTICATED', message: 'Not authenticated' }
+        error: { 
+          code: ctx.reason === 'UNAUTHENTICATED' ? 'UNAUTHENTICATED' : 'AUTH_ERROR',
+          message: ctx.reason === 'UNAUTHENTICATED' ? 'Not authenticated' : 'Authentication failed'
+        }
       }, { status: 401 });
     }
 
-    if (!orgId) {
+    if (!ctx.orgId) {
       return NextResponse.json({
         ok: false,
         error: { code: 'NO_ORG', message: 'No organization selected' }
       }, { status: 400 });
     }
 
-    // Check if user is admin - FIX: Use proper role resolution
-    let userRole = sessionClaims?.org_role as string;
-    if (!userRole) {
-      const memberships = await clerkClient.organizations.getOrganizationMembershipList({
-        organizationId: orgId,
-        limit: 100
-      });
-      const me = memberships.data.find(m => m.publicUserData?.userId === userId);
-      userRole = me?.role || null;
-    }
-    
-    if (userRole !== 'org:admin' && userRole !== 'admin') {
+    if (ctx.role !== 'admin') {
       return NextResponse.json({
         ok: false,
-        error: { code: 'FORBIDDEN', message: 'Admin access required' }
+        error: { code: 'ADMIN_REQUIRED', message: 'Admin access required' }
       }, { status: 403 });
     }
 
     const { membershipId } = params;
 
-    console.info('team.api', JSON.stringify({
-      route: 'DELETE /api/team/members/:membershipId',
-      evt: 'start',
-      orgId,
-      userId,
+    console.log('invites.clerk', JSON.stringify({
+      evt: 'member_delete_calling_clerk',
+      orgId: ctx.orgId,
+      userId: ctx.userId,
       membershipId
     }));
 
-    await clerkClient.organizations.deleteOrganizationMembership(membershipId);
+    await clerkClient.organizations.deleteOrganizationMembership({
+      organizationId: ctx.orgId,
+      membershipId
+    });
 
-    console.info('team.api', JSON.stringify({
-      route: 'DELETE /api/team/members/:membershipId',
-      evt: 'success',
-      orgId,
-      userId,
+    console.log('invites.clerk', JSON.stringify({
+      evt: 'member_delete_success',
+      orgId: ctx.orgId,
+      userId: ctx.userId,
       membershipId
     }));
 
@@ -173,24 +171,19 @@ export async function DELETE(
     });
 
   } catch (error: any) {
-    const clerkError = error?.errors?.[0];
-    
-    console.error('team.api', JSON.stringify({
-      route: 'DELETE /api/team/members/:membershipId',
-      evt: 'error',
-      orgId: (await auth()).orgId,
-      userId: (await auth()).userId,
-      membershipId: params.membershipId,
-      code: clerkError?.code,
-      message: clerkError?.message,
-      raw: error.message
+    console.error('invites.clerk', JSON.stringify({
+      evt: 'member_delete_error',
+      error: error.message,
+      code: error?.errors?.[0]?.code,
+      where: 'DELETE /api/team/members/[membershipId]',
+      membershipId: params.membershipId
     }));
 
     return NextResponse.json({
       ok: false,
       error: { 
-        code: clerkError?.code || 'CLERK_ERROR', 
-        message: clerkError?.message || 'Failed to remove member'
+        code: error?.errors?.[0]?.code || 'CLERK_ERROR', 
+        message: error?.errors?.[0]?.message || 'Failed to delete member'
       }
     }, { status: 500 });
   }
