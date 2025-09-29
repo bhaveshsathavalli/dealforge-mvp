@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth, createClerkClient } from "@clerk/nextjs/server";
+import { auth, clerkClient } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "./supabaseAdmin";
 import { ensureOrg } from "./ensureOrg";
 import { getActiveOrg } from "./org";
-import { captureMirrorError } from "@/app/api/debug/mirror/route";
 import { seedOrg } from "./seedOrg";
+
+function captureMirrorError(errorDetails: any) {
+  // For now, just log the error. Could be enhanced to send to monitoring service
+  console.error('Mirror error captured:', errorDetails);
+}
 
 function normalizeRole(r?: string): 'admin' | 'member' {
   if (!r) return 'member';
@@ -77,7 +81,7 @@ export function withOrgId<T extends (ctx: OrgContext, req: Request) => Promise<R
       }
     } else {
       // Production mode - use Clerk
-      const cc = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+      const cc = await clerkClient();
       
       if (!effectiveOrgId) {
         const list = await cc.users.getOrganizationMembershipList({ userId, limit: 10 });
@@ -95,14 +99,15 @@ export function withOrgId<T extends (ctx: OrgContext, req: Request) => Promise<R
         console.log('Test mode: skipping Clerk API calls');
       } else {
         // Production mode - fetch from Clerk and mirror
-        const cc = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
-        
-        // 1) Fetch user details, organization, and membership from Clerk
-        const [user, org, membershipList] = await Promise.all([
-          cc.users.getUser(userId),
-          cc.organizations.getOrganization({ organizationId: effectiveOrgId }),
-          cc.users.getOrganizationMembershipList({ userId, limit: 1 }),
-        ]);
+        try {
+          const cc = await clerkClient();
+          
+          // 1) Fetch user details, organization, and membership from Clerk
+          const [user, org, membershipList] = await Promise.all([
+            cc.users.getUser(userId),
+            cc.organizations.getOrganization({ organizationId: effectiveOrgId }),
+            cc.users.getOrganizationMembershipList({ userId, limit: 1 }),
+          ]);
         const userMembership = membershipList.data.find((m: any) => m.organization.id === effectiveOrgId);
         const originalRole = userMembership?.role;
         role = normalizeRole(originalRole);
@@ -128,7 +133,6 @@ export function withOrgId<T extends (ctx: OrgContext, req: Request) => Promise<R
               hint: orgError.hint
             };
             console.error('Org mirror upsert failed:', errorDetails);
-            captureMirrorError(errorDetails);
           } else {
             console.log(`Lazy mirror: Org upserted for ${effectiveOrgId}`);
           }
@@ -229,6 +233,14 @@ export function withOrgId<T extends (ctx: OrgContext, req: Request) => Promise<R
           });
           // Don't throw - seeding failures should not block navigation
         }
+        } catch (e) {
+          console.error('Clerk integration failed:', {
+            error: e,
+            orgId: effectiveOrgId,
+            message: e instanceof Error ? e.message : 'Unknown error'
+          });
+          // Continue without Clerk integration - don't block the flow
+        }
       }
     }
 
@@ -242,12 +254,36 @@ export function withOrgId<T extends (ctx: OrgContext, req: Request) => Promise<R
           .eq('clerk_org_id', effectiveOrgId)
           .single();
         supabaseOrgId = orgData?.id || null;
+        
+        // Debug trace logging for org mapping
+        console.log('Org mapping trace:', {
+          path: new URL(req.url).pathname,
+          clerkOrgId: effectiveOrgId,
+          dbOrgId: supabaseOrgId,
+          mappedOrgName: supabaseOrgId ? 'found' : 'not-found',
+          userId
+        });
+        
+        if (!supabaseOrgId) {
+          console.error('Org mapping failed: clerk org does not map to database org', {
+            clerkOrgId: effectiveOrgId,
+            userId
+          });
+        }
       } catch (e) {
         console.error('Failed to resolve Supabase orgId:', {
           clerkOrgId: effectiveOrgId,
           error: e
         });
       }
+    } else {
+      console.log('Org mapping trace: no clerk orgId provided', {
+        path: new URL(req.url).pathname,
+        clerkOrgId: effectiveOrgId,
+        dbOrgId: supabaseOrgId,
+        mappedOrgName: 'no-clerk-org',
+        userId
+      });
     }
 
             console.log('withOrgId calling handler with context:', { clerkUserId: userId, clerkOrgId: effectiveOrgId, orgId: supabaseOrgId, role });

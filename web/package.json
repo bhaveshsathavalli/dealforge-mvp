@@ -19,6 +19,7 @@
     "dev-features": "tsx scripts/dev-features.ts",
     "dev-integrations": "tsx scripts/dev-integrations.ts",
     "smoke:facts": "tsx scripts/dev-extract.ts",
+    "smoke:facts:pair": "tsx scripts/facts-smoke.ts",
     "backfill:org": "tsx scripts/backfill-org-id.ts --apply",
     "check:env": "tsx scripts/check-env-at-boot.ts",
     "test:competitors:watch": "vitest tests/competitors.delete.test.ts --watch=false --reporter=dot || exit 1",
@@ -55,6 +56,8 @@
     "openai": "^5.19.1",
     "react": "19.1.0",
     "react-dom": "19.1.0",
+    "stripe": "^18.5.0",
+    "svix": "^1.76.1",
     "tailwind-merge": "^3.3.1",
     "zod": "^3.25.76"
   },

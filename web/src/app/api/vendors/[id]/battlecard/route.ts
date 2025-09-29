@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { withOrgId } from '@/server/withOrg';
+import { withOrgId, OrgContext } from '@/server/withOrg';
 import { supabaseServer } from '@/lib/supabaseServer';
 import { ok, err } from '@/server/util/apiJson';
 import crypto from 'crypto';
@@ -56,17 +56,21 @@ function composeNarrativeFromBullets(bullets: any[]): any {
   return narrative;
 }
 
-export const GET = withOrgId(async ({ orgId }, request: NextRequest, { params }: { params: { id: string } }) => {
+export const GET = withOrgId(async (ctx: OrgContext, req: Request) => {
   const traceId = crypto.randomUUID();
+  
+  // Extract vendor ID from URL
+  const url = new URL(req.url);
+  const vendorId = url.pathname.split('/')[3]; // Extract ID from /api/vendors/[id]/battlecard
   
   // Validate UUID param
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  if (!uuidRegex.test(params.id)) {
-    return err(400, 'Invalid vendor ID format', { id: params.id });
+  if (!uuidRegex.test(vendorId)) {
+    return err(400, 'Invalid vendor ID format', { id: vendorId });
   }
 
   // Validate active org
-  if (!orgId) {
+  if (!ctx.orgId) {
     return err(401, 'No active organization', { traceId });
   }
 
@@ -77,12 +81,12 @@ export const GET = withOrgId(async ({ orgId }, request: NextRequest, { params }:
     const { data: vendor, error: vendorError } = await sb
       .from('vendors')
       .select('*')
-      .eq('id', params.id)
-      .eq('org_id', orgId)
+      .eq('id', vendorId)
+      .eq('org_id', ctx.orgId)
       .single();
 
     if (vendorError || !vendor) {
-      return err(404, 'Vendor not found in organization', { id: params.id, traceId });
+      return err(404, 'Vendor not found in organization', { id: vendorId, traceId });
     }
 
     // Get facts by lane with individual error handling
@@ -95,8 +99,8 @@ export const GET = withOrgId(async ({ orgId }, request: NextRequest, { params }:
         const { data: facts, error: factsError } = await sb
           .from('facts')
           .select('*')
-          .eq('vendor_id', params.id)
-          .eq('org_id', orgId) // Add org filter
+          .eq('vendor_id', vendorId)
+          .eq('org_id', ctx.orgId) // Add org filter
           .eq('metric', metric);
 
         if (factsError) {
@@ -132,7 +136,7 @@ export const GET = withOrgId(async ({ orgId }, request: NextRequest, { params }:
       const { data: bullets } = await sb
         .from('battlecard_bullets')
         .select('*')
-        .eq('run_id', params.id) // Using vendor ID as run_id for now
+        .eq('run_id', vendorId) // Using vendor ID as run_id for now
         .order('section', { ascending: true });
 
       narrative = bullets ? composeNarrativeFromBullets(bullets) : undefined;

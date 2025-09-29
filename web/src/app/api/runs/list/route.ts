@@ -30,4 +30,4 @@ export const GET = withOrgId(async ({ orgId }) => {
     console.error("[api/runs/list] unexpected error:", err);
     return NextResponse.json({ error: "server_error" }, { status: 500 });
   }
-}
+});

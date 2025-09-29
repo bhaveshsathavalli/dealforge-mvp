@@ -2,6 +2,7 @@ import { supabaseAdmin } from '@/server/supabaseAdmin';
 import { auth } from '@clerk/nextjs/server';
 import { redirect } from 'next/navigation';
 import CompetitorsManagement from '@/components/CompetitorsManagement';
+import { getUsage } from '@/server/usage';
 
 export default async function CompetitorsPage() {
   const { userId, orgId } = await auth();
@@ -21,13 +22,16 @@ export default async function CompetitorsPage() {
     redirect('/dashboard'); 
   }
   
-  // Get competitors
-  const { data: competitors, error: competitorsError } = await supabaseAdmin
-    .from('competitors')
-    .select('id, name, website, slug, active, aliases')
-    .eq('org_id', org.id)
-    .eq('active', true)
-    .order('created_at', { ascending: false });
+  // Get usage data and competitors
+  const [usage, { data: competitors, error: competitorsError }] = await Promise.all([
+    getUsage(org.id),
+    supabaseAdmin
+      .from('competitors')
+      .select('id, name, website, slug, active, aliases')
+      .eq('org_id', org.id)
+      .eq('active', true)
+      .order('created_at', { ascending: false })
+  ]);
 
   if (competitorsError) { 
     console.error('Error fetching competitors:', competitorsError);
@@ -45,6 +49,7 @@ export default async function CompetitorsPage() {
       <CompetitorsManagement 
         org={org} 
         initialCompetitors={competitors || []} 
+        initialCount={usage.competitorsUsed}
       />
     </div>
   );

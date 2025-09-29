@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextResponse, NextRequest } from "next/server";
 import { supabaseAdmin } from "@/server/supabaseAdmin";
-import { withOrg } from "@/server/withOrg";
+import { auth } from "@clerk/nextjs/server";
 
 function normalizeUrl(raw: string) {
   const s = (raw || "").trim();
@@ -38,11 +38,31 @@ async function readBody(req: Request) {
   }
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const { orgId } = await withOrg();
-    const supabase = supabaseAdmin;
+    // Get user info directly from Clerk auth
+    const { userId, orgId: clerkOrgId } = await auth();
+    
+    if (!userId) {
+      return NextResponse.json({ error: "User not authenticated" }, { status: 401 });
+    }
+    
+    if (!clerkOrgId) {
+      return NextResponse.json({ error: "No organization context" }, { status: 400 });
+    }
 
+    // Get Supabase org UUID from clerk_org_id
+    const { data: orgData, error: orgError } = await supabaseAdmin
+      .from("orgs")
+      .select("id")
+      .eq("clerk_org_id", clerkOrgId)
+      .single();
+
+    if (orgError || !orgData) {
+      return NextResponse.json({ error: "Organization not found" }, { status: 404 });
+    }
+
+    const supabase = supabaseAdmin;
     const body = await readBody(req);
     const name = String(body.name ?? body.product_name ?? "").trim();
     const website = normalizeUrl(String(body.website ?? body.product_website ?? ""));
@@ -55,7 +75,7 @@ export async function POST(req: Request) {
     const { data: existing, error: findErr } = await supabase
       .from("vendors")
       .select("id")
-      .eq("org_id", orgId)
+      .eq("org_id", orgData.id)
       .order("created_at", { ascending: true })
       .limit(1);
     if (findErr) throw findErr;
@@ -69,29 +89,52 @@ export async function POST(req: Request) {
     } else {
       const { error: insErr } = await supabase
         .from("vendors")
-        .insert({ org_id: orgId, name, website });
+        .insert({ org_id: orgData.id, name, website });
       if (insErr) throw insErr;
     }
 
     return NextResponse.redirect(new URL("/settings?tab=general", req.url), { status: 303 });
   } catch (e: any) {
+    console.error("Settings product save error:", e);
     return NextResponse.json({ error: e?.message ?? "unknown error" }, { status: 500 });
   }
 }
 
 // Optional: GET for debugging the current vendor row
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
   try {
-    const { orgId } = await withOrg();
+    // Get user info directly from Clerk auth
+    const { userId, orgId: clerkOrgId } = await auth();
+    
+    if (!userId) {
+      return NextResponse.json({ error: "User not authenticated" }, { status: 401 });
+    }
+    
+    if (!clerkOrgId) {
+      return NextResponse.json({ error: "No organization context" }, { status: 400 });
+    }
+
+    // Get Supabase org UUID from clerk_org_id
+    const { data: orgData, error: orgError } = await supabaseAdmin
+      .from("orgs")
+      .select("id")
+      .eq("clerk_org_id", clerkOrgId)
+      .single();
+
+    if (orgError || !orgData) {
+      return NextResponse.json({ error: "Organization not found" }, { status: 404 });
+    }
+
     const supabase = supabaseAdmin;
     const { data } = await supabase
       .from("vendors")
       .select("id,name,website,created_at")
-      .eq("org_id", orgId)
+      .eq("org_id", orgData.id)
       .order("created_at", { ascending: true })
       .limit(1);
     return NextResponse.json({ vendor: data?.[0] ?? null });
   } catch (e: any) {
+    console.error("Settings product GET error:", e);
     return NextResponse.json({ error: e?.message ?? "unknown error" }, { status: 500 });
   }
 }

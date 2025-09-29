@@ -56,7 +56,7 @@ export default function OrganizationSettings({ org, competitors, isAdmin, vendor
               <label className="block text-sm font-medium mb-2">Product Website</label>
               <input
                 name="product_website"
-                type="url"
+                type="text"
                 defaultValue={vendor?.website ?? ""}
                 className="w-full border rounded px-4 py-2 text-sm"
                 placeholder="https://example.com"

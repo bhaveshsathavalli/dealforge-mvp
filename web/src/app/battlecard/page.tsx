@@ -11,6 +11,7 @@ import ChangelogCard from '@/components/battlecard/ChangelogCard';
 import LandminesList from '@/components/battlecard/LandminesList';
 import PersonaToggle from '@/components/battlecard/PersonaToggle';
 import ComposeButtons from '@/components/battlecard/ComposeButtons';
+import { FactsDrawer } from '@/components/battlecard/FactsDrawer';
 
 interface BattlecardData {
   pricing: any[];
@@ -43,6 +44,7 @@ export default function BattlecardPage() {
   const [errorDetails, setErrorDetails] = useState<any>(null);
   const [pipelineHealth, setPipelineHealth] = useState<any>(null);
   const [selectedPersona, setSelectedPersona] = useState<'AE' | 'SE' | 'Exec'>('AE');
+  const [factsDrawerOpen, setFactsDrawerOpen] = useState(false);
 
   useEffect(() => {
     const v = searchParams.get('v');
@@ -225,6 +227,12 @@ export default function BattlecardPage() {
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-semibold">Battlecard</h1>
         <div className="flex items-center gap-4">
+          <button
+            onClick={() => setFactsDrawerOpen(true)}
+            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors"
+          >
+            View facts
+          </button>
           <PersonaToggle 
             selectedPersona={selectedPersona} 
             onPersonaChange={setSelectedPersona} 
@@ -360,6 +368,15 @@ export default function BattlecardPage() {
           </div>
         </div>
       </div>
+
+      {/* Facts Drawer */}
+      {vendorId && (
+        <FactsDrawer 
+          isOpen={factsDrawerOpen}
+          onClose={() => setFactsDrawerOpen(false)}
+          vendorId={vendorId}
+        />
+      )}
     </div>
   );
 }

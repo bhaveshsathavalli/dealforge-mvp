@@ -23,11 +23,13 @@ interface Competitor {
 interface CompetitorsManagementProps {
   org: Organization;
   initialCompetitors: Competitor[];
+  initialCount?: number;
   isAdmin?: boolean;
 }
 
-export default function CompetitorsManagement({ org, initialCompetitors, isAdmin = true }: CompetitorsManagementProps) {
+export default function CompetitorsManagement({ org, initialCompetitors, initialCount = initialCompetitors.length, isAdmin = true }: CompetitorsManagementProps) {
   const [competitors, setCompetitors] = useState<Competitor[]>(initialCompetitors);
+  const [competitorsCount, setCompetitorsCount] = useState<number>(initialCount);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -77,6 +79,7 @@ export default function CompetitorsManagement({ org, initialCompetitors, isAdmin
 
       const result = await response.json();
       setCompetitors(prev => [result.competitor, ...prev]);
+      setCompetitorsCount(prev => prev + 1);
       setNewCompetitor({ name: '', website: '', aliases: '' });
       setSuccess('Competitor added successfully!');
       setTimeout(() => setSuccess(null), 3000);
@@ -140,6 +143,7 @@ export default function CompetitorsManagement({ org, initialCompetitors, isAdmin
       
       // Optimistically remove from list
       setCompetitors(prev => prev.filter(c => c.id !== id));
+      setCompetitorsCount(prev => prev - 1);
       setSuccess('Competitor deleted successfully!');
       setTimeout(() => setSuccess(null), 3000);
     } catch (err: any) {
@@ -155,7 +159,7 @@ export default function CompetitorsManagement({ org, initialCompetitors, isAdmin
     }
   };
 
-  const isAtLimit = competitors.length >= org.max_competitors;
+  const isAtLimit = competitorsCount >= org.max_competitors;
 
   return (
     <div className="space-y-4">
@@ -164,7 +168,7 @@ export default function CompetitorsManagement({ org, initialCompetitors, isAdmin
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Usage:</span>
           <div className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200">
-            {competitors.length} / {org.max_competitors} used
+            {competitorsCount} / {org.max_competitors} used
           </div>
         </div>
       </div>

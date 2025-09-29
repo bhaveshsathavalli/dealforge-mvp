@@ -19,7 +19,7 @@ export async function collectLane(
   vendorId: string, 
   lane: Lane,
   orgId: string
-): Promise<{ saved: number; skipped: boolean; reason?: string }> {
+): Promise<{ lane: Lane; saved: number; skipped: boolean; minConfidence: number; reason?: string; errors?: string[] }> {
   const sb = supabaseServer();
 
   // Get vendor info
@@ -31,28 +31,39 @@ export async function collectLane(
     .single();
 
   if (vendorError || !vendor) {
-    return { saved: 0, skipped: true, reason: 'Vendor not found' };
+    return { lane, saved: 0, skipped: true, minConfidence: 0.7, reason: 'Vendor not found' };
   }
 
   if (!vendor.website) {
-    return { saved: 0, skipped: true, reason: 'No website URL' };
+    return { lane, saved: 0, skipped: true, minConfidence: 0.7, reason: 'No website URL' };
   }
 
-  // Check TTL - look for recent sources for this lane
+  // Check TTL - look for recent sources AND facts for this lane
   const ttlDays = TTL[lane];
   const ttlDate = new Date();
   ttlDate.setDate(ttlDate.getDate() - ttlDays);
 
-  const { data: recentSources } = await sb
-    .from('sources')
-    .select('fetched_at')
-    .eq('vendor_id', vendorId)
-    .eq('metric', lane)
-    .gte('fetched_at', ttlDate.toISOString())
-    .limit(1);
+  const [{ data: recentSources }, { data: recentFacts }] = await Promise.all([
+    sb
+      .from('sources')
+      .select('fetched_at')
+      .eq('vendor_id', vendorId)
+      .eq('org_id', orgId)
+      .eq('metric', lane)
+      .gte('fetched_at', ttlDate.toISOString())
+      .limit(1),
+    sb
+      .from('facts')
+      .select('id')
+      .eq('vendor_id', vendorId)
+      .eq('org_id', orgId)
+      .eq('metric', lane)
+      .limit(1)
+  ]);
 
-  if (recentSources && recentSources.length > 0) {
-    return { saved: 0, skipped: true, reason: `Within TTL (${ttlDays} days)` };
+  // Only skip if there are BOTH fresh sources AND facts
+  if (recentSources && recentSources.length > 0 && recentFacts && recentFacts.length > 0) {
+    return { lane, saved: 0, skipped: true, minConfidence: 0.7, reason: `Within TTL (${ttlDays} days)` };
   }
 
   // Generate seed URLs for the lane
@@ -62,6 +73,8 @@ export async function collectLane(
   let totalSaved = 0;
   const errors: string[] = [];
 
+
+  // Handle regular lanes that process seed URLs
   for (const url of seeds) {
     try {
       // Fetch content using Jina
@@ -75,10 +88,66 @@ export async function collectLane(
           extractedData = featuresMarkdown({ md, url });
           break;
         case 'pricing':
+          // Use pricing collector
+          const pricingResult = await import('@/lib/facts/collectors/pricing').then(
+            ({ extractPricing }) => extractPricing({
+              orgId,
+              vendor: {
+                id: vendor.id,
+                website: vendor.website,
+                domain: new URL(vendor.website).hostname
+              },
+              page: { url, mainHtml: md, text: md, fetchedAt: new Date().toISOString() }
+            })
+          );
+          extractedData = pricingResult.factIds.map(id => ({ factId: id, metric: 'pricing' }));
+          break;
         case 'integrations':
+          // Use integrations collector
+          const integrationsResult = await import('@/lib/facts/collectors/integrations').then(
+            ({ extractIntegrations }) => extractIntegrations({
+              orgId,
+              vendor: {
+                id: vendor.id,
+                website: vendor.website,
+                domain: new URL(vendor.website).hostname
+              },
+              page: { url, mainHtml: md, text: md, fetchedAt: new Date().toISOString() }
+            })
+          );
+          extractedData = integrationsResult.factIds.map(id => ({ factId: id, metric: 'integrations' }));
+          break;
         case 'trust':
+          // Use security collector
+          const securityResult = await import('@/lib/facts/collectors/security').then(
+            ({ extractSecurity }) => extractSecurity({
+              orgId,
+              vendor: {
+                id: vendor.id,
+                website: vendor.website,
+                domain: new URL(vendor.website).hostname
+              },
+              page: { url, mainHtml: md, text: md, fetchedAt: new Date().toISOString() }
+            })
+          );
+          extractedData = securityResult.factIds.map(id => ({ factId: id, metric: 'trust' }));
+          break;
         case 'changelog':
-          // TODO: Implement other extractors
+          // Use changelog collector
+          const changelogResult = await import('@/lib/facts/collectors/changelog').then(
+            ({ extractChangelog }) => extractChangelog({
+              orgId,
+              vendor: {
+                id: vendor.id,
+                website: vendor.website,
+                domain: new URL(vendor.website).hostname
+              },
+              page: { url, mainHtml: md, text: md, fetchedAt: new Date().toISOString() }
+            })
+          );
+          extractedData = changelogResult.factIds.map(id => ({ factId: id, metric: 'changelog' }));
+          break;
+        default:
           extractedData = [];
           break;
       }
@@ -102,21 +171,27 @@ export async function collectLane(
         trustTier: 1,
       });
 
-      // Save facts
-      for (const item of extractedData) {
-        const factId = await upsertFact({
-          orgId: orgId,
-          vendorId: vendor.id,
-          metric: lane,
-          subject: `${lane}:${item.feature || item.name || item.id || 'unknown'}`,
-          key: 'data',
-          value_json: item,
-          units: null,
-          text_summary: item.display || item.description || JSON.stringify(item),
-          citations: [sourceId],
-          confidence: item.confidence || 0.8,
-        });
-        totalSaved++;
+      // Handle fact saving based on lane type
+      if (lane === 'pricing' || lane === 'integrations') {
+        // These collectors already save facts internally, just count them
+        totalSaved += extractedData.length;
+      } else {
+        // Save facts for other lanes
+        for (const item of extractedData) {
+          const factId = await upsertFact({
+            orgId: orgId,
+            vendorId: vendor.id,
+            metric: lane,
+            subject: `${lane}:${item.feature || item.name || item.id || 'unknown'}`,
+            key: 'data',
+            value_json: item,
+            units: null,
+            text_summary: item.display || item.description || JSON.stringify(item),
+            citations: [sourceId],
+            confidence: item.confidence || 0.8,
+          });
+          totalSaved++;
+        }
       }
 
     } catch (error) {
@@ -124,11 +199,15 @@ export async function collectLane(
     }
   }
 
-  if (totalSaved === 0 && errors.length > 0) {
-    return { saved: 0, skipped: false, reason: errors.join('; ') };
-  }
-
-  return { saved: totalSaved, skipped: false };
+  const minConfidence = 0.7; // Default minimum confidence
+  
+  return {
+    lane,
+    saved: totalSaved,
+    skipped: false,
+    minConfidence,
+    ...(errors.length > 0 && { errors })
+  };
 }
 
 function generateSeeds(baseUrl: string, lane: Lane): string[] {

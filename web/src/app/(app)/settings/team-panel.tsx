@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useUser } from '@clerk/nextjs';
 import { safeJson } from '@/lib/safeJson';
+import { Usage } from '@/server/usage';
 
 type MemberRow = {
   membershipId: string;
@@ -24,9 +25,10 @@ type InvitationRow = {
 
 interface TeamPanelProps {
   role: 'admin' | 'member';
+  usageData: Usage;
 }
 
-export default function TeamPanel({ role }: TeamPanelProps) {
+export default function TeamPanel({ role, usageData }: TeamPanelProps) {
   const { user } = useUser();
   const [loading, setLoading] = useState(true);
   const [members, setMembers] = useState<MemberRow[]>([]);
@@ -216,6 +218,9 @@ export default function TeamPanel({ role }: TeamPanelProps) {
 
       <div className="rounded border p-4">
         <div className="font-medium mb-3">Members</div>
+        <div className="text-sm text-muted-foreground mb-3">
+          Usage: {usageData.usersUsed} / {usageData.usersLimit}
+        </div>
         {loading ? (
           <div>Loading…</div>
         ) : (

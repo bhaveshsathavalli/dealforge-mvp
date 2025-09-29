@@ -5,23 +5,27 @@ import { composeNarrative } from '@/lib/compose';
 import { ok, err } from '@/server/util/apiJson';
 import crypto from 'crypto';
 
-export const POST = withOrgId(async ({ orgId }, request: NextRequest, { params }: { params: { id: string } }) => {
+export const POST = withOrgId(async (ctx: OrgContext, req: Request) => {
   const traceId = crypto.randomUUID();
+  
+  // Extract vendor ID from URL
+  const url = new URL(req.url);
+  const vendorId = url.pathname.split('/')[3]; // Extract ID from /api/vendors/[id]/compose
   
   // Validate UUID param
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  if (!uuidRegex.test(params.id)) {
-    return err(400, 'Invalid vendor ID format', { id: params.id });
+  if (!uuidRegex.test(vendorId)) {
+    return err(400, 'Invalid vendor ID format', { id: vendorId });
   }
 
   // Validate active org
-  if (!orgId) {
+  if (!ctx.orgId) {
     return err(401, 'No active organization', { traceId });
   }
 
   try {
     // Get request body
-    const body = await request.json();
+    const body = await req.json();
     const { persona }: { persona: 'AE' | 'SE' | 'Exec' } = body;
 
     if (!persona || !['AE', 'SE', 'Exec'].includes(persona)) {
@@ -34,20 +38,20 @@ export const POST = withOrgId(async ({ orgId }, request: NextRequest, { params }
     const { data: vendor, error: vendorError } = await sb
       .from('vendors')
       .select('*')
-      .eq('id', params.id)
-      .eq('org_id', orgId)
+      .eq('id', vendorId)
+      .eq('org_id', ctx.orgId)
       .single();
 
     if (vendorError || !vendor) {
-      return err(404, 'Vendor not found in organization', { id: params.id, traceId });
+      return err(404, 'Vendor not found in organization', { id: vendorId, traceId });
     }
 
     // Get facts for composition (only structured data, no raw page text)
     const { data: facts, error: factsError } = await sb
       .from('facts')
       .select('*')
-      .eq('vendor_id', params.id)
-      .eq('org_id', orgId) // Add org filter
+      .eq('vendor_id', vendorId)
+      .eq('org_id', ctx.orgId) // Add org filter
       .not('text_summary', 'is', null)
       .order('fact_score', { ascending: false })
       .limit(50); // Limit to top 50 facts to avoid token limits
@@ -71,7 +75,7 @@ export const POST = withOrgId(async ({ orgId }, request: NextRequest, { params }
     const bullets = [];
     
     // Create a synthetic run_id for this vendor (in a real implementation, this would be a proper compare run)
-    const runId = params.id; // Using vendor ID as run_id for now
+    const runId = vendorId; // Using vendor ID as run_id for now
 
     // Clear existing bullets for this vendor
     await sb
@@ -195,4 +199,4 @@ export const POST = withOrgId(async ({ orgId }, request: NextRequest, { params }
       error: error instanceof Error ? error.message : 'Unknown error'
     });
   }
-}
+});

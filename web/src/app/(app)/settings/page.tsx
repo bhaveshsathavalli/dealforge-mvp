@@ -9,6 +9,7 @@ import TeamPanel from "./team-panel";
 import CompetitorsManagement from "@/components/CompetitorsManagement";
 import PlanCard from "./components/PlanCard";
 import ManageSubscription from "./components/ManageSubscription";
+import { getUsage } from '@/server/usage';
 
 export default async function Page({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   // Get user role from server-side context (includes test mode support)
@@ -161,26 +162,32 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
   // Use role from ensureOrg() result as the single source of truth
   const isAdmin = res.role === 'admin';
 
-  // Get competitors count and vendor data in parallel
+  // Use the resolved orgId from ensureOrg result (Supabase UUID)
+  const resolvedOrgId = res.orgId || org.id;
+
+  // Get usage data and other data in parallel
   const [
-    { data: competitorsCount, error: competitorsError },
+    usage,
+    { data: competitorsData, error: competitorsDataError },
     { data: vendorData, error: vendorError }
   ] = await Promise.all([
+    getUsage(resolvedOrgId),
     supabaseAdmin
       .from('competitors')
-      .select('id', { count: 'exact', head: true })
-      .eq('org_id', org.id)
-      .eq('active', true),
+      .select('id,name,website,slug,active,aliases')
+      .eq('org_id', resolvedOrgId)
+      .eq('active', true)
+      .order('created_at', { ascending: false }),
     supabaseAdmin
       .from("vendors")
       .select("id, name, website")
-      .eq("org_id", org.id)
+      .eq("org_id", resolvedOrgId)
       .order("created_at", { ascending: true })
       .limit(1)
   ]);
 
-  if (competitorsError) {
-    console.error('Error loading competitors count:', competitorsError);
+  if (competitorsDataError) {
+    console.error('Error loading competitors data:', competitorsDataError);
   }
   
   if (vendorError) {
@@ -213,11 +220,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
         <>
           {/* Plan Card */}
           <PlanCard
-            orgName={org.name}
-            planType={org.plan_type}
-            maxUsers={org.max_users}
-            maxCompetitors={org.max_competitors}
-            competitorsUsed={competitorsCount?.length ? competitorsCount.length : competitorsCount?.count ?? 0}
+            orgName={usage.orgName}
+            planType=""
+            maxUsers={usage.usersLimit}
+            maxCompetitors={usage.competitorsLimit}
+            competitorsUsed={usage.competitorsUsed}
+            usersUsed={usage.usersUsed}
           />
           
           {/* Organization Card - Product Information */}
@@ -242,13 +250,14 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
           
           <CompetitorsManagement 
             org={org} 
-            initialCompetitors={competitors || []} 
+            initialCompetitors={competitorsData || []} 
+            initialCount={usage.competitorsUsed}
             isAdmin={isAdmin}
           />
         </div>
       )}
       
-      {tab === 'team' && <TeamPanel role={res.role} />}
+      {tab === 'team' && <TeamPanel role={res.role} usageData={usage} />}
     </div>
   );
 }
