@@ -150,8 +150,7 @@ export async function PATCH(
     }
 
     // Use the correct Clerk SDK method
-    await client.organizationMemberships.updateOrganizationMembership({
-      organizationMembershipId: membershipId,
+    await client.organizations.updateOrganizationMembership(membershipId, {
       organizationId: ctx.orgId!,
       role: clerkRole,
     });
@@ -294,10 +293,7 @@ export async function DELETE(
     }
 
     // Use the correct Clerk SDK method
-    await client.organizationMemberships.deleteOrganizationMembership({
-      organizationMembershipId: membershipId,
-      organizationId: ctx.orgId!,
-    });
+    await client.organizations.deleteOrganizationMembership(membershipId);
 
     const successResult = {
       evt: 'result',
