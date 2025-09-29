@@ -1,12 +1,7 @@
 import { NextResponse } from 'next/server';
 import { resolveOrgContext } from '@/server/orgContext';
 import { clerkClient } from '@clerk/nextjs/server';
-import { z } from 'zod';
-import { UiRole, toClerkRole } from '@/server/roles';
-
-const updateRoleSchema = z.object({
-  role: z.enum(['member', 'admin'])
-});
+import { toClerkRole } from '@/server/roles';
 
 export async function PATCH(
   req: Request,
@@ -37,49 +32,40 @@ export async function PATCH(
       }, { status: 403 });
     }
 
-    const body = await req.json();
-    const validation = updateRoleSchema.safeParse(body);
-    
-    if (!validation.success) {
+    let body: any;
+    try {
+      body = await req.json();
+    } catch (error) {
       return NextResponse.json({
         ok: false,
-        error: { code: 'VALIDATION_ERROR', message: 'Invalid role', details: validation.error.errors }
+        error: { code: 'BAD_BODY', message: 'Invalid JSON body' }
       }, { status: 400 });
     }
 
-    const { membershipId } = params;
-    const { role } = validation.data;
-    const clerkRole = toClerkRole(role as UiRole);
-
-    console.log('team.api', { evt: 'member.role.change', membershipId, role, clerkRole });
-
-    try {
-      // Update member role via Clerk
-      const client = await clerkClient();
-      await client.organizations.updateOrganizationMembership({
-        organizationId: ctx.orgId!,
-        membershipId,
-        role: clerkRole
-      });
-
-      console.log('team.api', { evt: 'member.role.change', success: true });
-
+    const { role } = body;
+    
+    // Validate role
+    if (!role || !['member', 'admin'].includes(role)) {
       return NextResponse.json({
-        ok: true
-      });
-
-    } catch (updateError: any) {
-      // Handle "last admin" scenario
-      if (updateError?.message?.includes('last admin') || updateError?.message?.includes('at least one admin')) {
-        console.log('team.api', { evt: 'member.role.last_admin', membershipId });
-        return NextResponse.json({
-          ok: false,
-          error: { code: 'LAST_ADMIN', message: 'Cannot remove the last admin' }
-        }, { status: 409 });
-      }
-
-      throw updateError;
+        ok: false,
+        error: { code: 'INVALID_ROLE', message: 'Role must be "member" or "admin"' }
+      }, { status: 400 });
     }
+
+    const clerkRole = toClerkRole(role);
+
+    console.log('team.api', { evt: 'member.role.change', membershipId: params.membershipId, role, clerkRole });
+
+    const client = await clerkClient();
+    await client.organizations.updateOrganizationMembership({
+      organizationId: ctx.orgId!,
+      membershipId: params.membershipId,
+      role: clerkRole,
+    });
+
+    console.log('team.api', { evt: 'member.role.change', success: true });
+
+    return NextResponse.json({ ok: true }, { status: 200 });
 
   } catch (error: any) {
     const clerkError = error?.errors?.[0];
@@ -131,22 +117,36 @@ export async function DELETE(
       }, { status: 403 });
     }
 
-    const { membershipId } = params;
+    console.log('team.api', { evt: 'member.remove', membershipId: params.membershipId });
 
-    console.log('team.api', { evt: 'member.remove', membershipId });
-
-    // Remove member via Clerk
     const client = await clerkClient();
+    
+    // Check if this is the last admin before removing
+    const list = await client.organizations.getOrganizationMembershipList({
+      organizationId: ctx.orgId!,
+      limit: 100
+    });
+    
+    const adminCount = list.data.filter(m => ['admin','org:admin'].includes(m.role)).length;
+    const target = list.data.find(m => m.id === params.membershipId);
+    const targetIsAdmin = ['admin','org:admin'].includes(target?.role || '');
+    
+    if (targetIsAdmin && adminCount <= 1) {
+      console.log('team.api', { evt: 'member.remove.last_admin', membershipId: params.membershipId });
+      return NextResponse.json({
+        ok: false,
+        error: { code: 'LAST_ADMIN', message: 'Cannot remove the last admin' }
+      }, { status: 409 });
+    }
+
     await client.organizations.deleteOrganizationMembership({
       organizationId: ctx.orgId!,
-      membershipId
+      membershipId: params.membershipId,
     });
 
     console.log('team.api', { evt: 'member.remove', success: true });
 
-    return NextResponse.json({
-      ok: true
-    });
+    return NextResponse.json({ ok: true }, { status: 200 });
 
   } catch (error: any) {
     const clerkError = error?.errors?.[0];

@@ -23,13 +23,12 @@ export async function GET() {
     if (!ctx.orgId) {
       return NextResponse.json({
         ok: true,
-        data: { invitations: [] }
+        data: { invitations: [] },
       });
     }
 
     console.log('team.api', { evt: 'invites.list', orgId: ctx.orgId });
 
-    // Get invitations from Clerk - only pending invites
     const client = await clerkClient();
     const invitations = await client.organizations.getOrganizationInvitationList({
       organizationId: ctx.orgId!,
@@ -43,7 +42,6 @@ export async function GET() {
         id: invite.id,
         email: invite.emailAddress,
         role: fromClerkRole(invite.role),
-        status: invite.status,
         createdAt: invite.createdAt
       }));
 
@@ -100,7 +98,16 @@ export async function POST(req: Request) {
       }, { status: 403 });
     }
 
-    const body = await req.json();
+    let body: any;
+    try {
+      body = await req.json();
+    } catch (error) {
+      return NextResponse.json({
+        ok: false,
+        error: { code: 'BAD_BODY', message: 'Invalid JSON body' }
+      }, { status: 400 });
+    }
+
     const validation = inviteSchema.safeParse(body);
     
     if (!validation.success) {
@@ -115,20 +122,17 @@ export async function POST(req: Request) {
 
     console.log('team.api', { evt: 'invites.create', email, role, clerkRole });
 
-    // Create invitation via Clerk
     const client = await clerkClient();
     await client.organizations.createOrganizationInvitation({
       organizationId: ctx.orgId!,
+      inviterUserId: ctx.userId,
       emailAddress: email,
       role: clerkRole,
-      inviterUserId: ctx.userId
     });
 
     console.log('team.api', { evt: 'invites.create', success: true });
 
-    return NextResponse.json({
-      ok: true
-    });
+    return NextResponse.json({ ok: true }, { status: 200 });
 
   } catch (error: any) {
     const clerkError = error?.errors?.[0];

@@ -55,15 +55,38 @@ export async function saveProduct(data: { name: string; website?: string }) {
     }
   }
   
-  const { error } = await supabaseAdmin
-    .from('orgs')
-    .update({ 
-      product_name: data.name.trim(),
-      product_website: normalizedWebsite || null 
-    })
-    .eq('id', orgId);
+  // Check if vendor already exists for this org
+  const { data: existingVendor } = await supabaseAdmin
+    .from('vendors')
+    .select('id')
+    .eq('org_id', orgId)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
   
-  if (error) throw new Error(error.message);
+  if (existingVendor) {
+    // Update existing vendor
+    const { error } = await supabaseAdmin
+      .from('vendors')
+      .update({ 
+        name: data.name.trim(),
+        website: normalizedWebsite || null 
+      })
+      .eq('id', existingVendor.id);
+    
+    if (error) throw new Error(error.message);
+  } else {
+    // Create new vendor
+    const { error } = await supabaseAdmin
+      .from('vendors')
+      .insert({ 
+        org_id: orgId,
+        name: data.name.trim(),
+        website: normalizedWebsite || null 
+      });
+    
+    if (error) throw new Error(error.message);
+  }
   
   revalidatePath('/settings');
 }
@@ -72,20 +95,22 @@ export async function detectProductWebsite() {
   const { orgId: clerkOrgId } = await requireOrg();
   const orgId = await getOrgIdFromClerkOrgId(clerkOrgId);
   
-  const { data: org, error } = await supabaseAdmin
-    .from('orgs')
-    .select('product_name')
-    .eq('id', orgId)
+  const { data: vendor, error } = await supabaseAdmin
+    .from('vendors')
+    .select('name')
+    .eq('org_id', orgId)
+    .order('created_at', { ascending: true })
+    .limit(1)
     .single();
     
-  if (error || !org) {
-    throw new Error('Organization not found');
+  if (error || !vendor) {
+    throw new Error('Vendor not found');
   }
   
-  if (!org.product_name) {
+  if (!vendor.name) {
     throw new Error('Product name is required to detect website');
   }
   
-  const url = await serpFindHomepage(org.product_name);
+  const url = await serpFindHomepage(vendor.name);
   return { url };
 }

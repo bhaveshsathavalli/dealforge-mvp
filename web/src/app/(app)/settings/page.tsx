@@ -161,16 +161,41 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
   // Use role from ensureOrg() result as the single source of truth
   const isAdmin = res.role === 'admin';
 
-  // Get competitors count for plan display
-  const { data: competitorsCount, error: competitorsError } = await supabaseAdmin
-    .from('competitors')
-    .select('id', { count: 'exact', head: true })
-    .eq('org_id', org.id)
-    .eq('active', true);
+  // Get competitors count and vendor data in parallel
+  const [
+    { data: competitorsCount, error: competitorsError },
+    { data: vendorData, error: vendorError }
+  ] = await Promise.all([
+    supabaseAdmin
+      .from('competitors')
+      .select('id', { count: 'exact', head: true })
+      .eq('org_id', org.id)
+      .eq('active', true),
+    supabaseAdmin
+      .from("vendors")
+      .select("id, name, website")
+      .eq("org_id", org.id)
+      .order("created_at", { ascending: true })
+      .limit(1)
+  ]);
 
   if (competitorsError) {
     console.error('Error loading competitors count:', competitorsError);
   }
+  
+  if (vendorError) {
+    console.error('Error loading vendor data:', vendorError);
+  }
+
+  // Extract vendor info - earliest vendor for the org
+  const vendor = vendorData?.[0] ? { 
+    name: vendorData[0].name ?? "", 
+    website: vendorData[0].website ?? "" 
+  } : { 
+    name: "", 
+    website: "" 
+  };
+
 
   const tab = (await searchParams)?.tab ?? 'general';
 
@@ -196,7 +221,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
           />
           
           {/* Organization Card - Product Information */}
-          <OrganizationSettings org={org} competitors={[]} isAdmin={isAdmin} />
+          <OrganizationSettings org={org} competitors={[]} isAdmin={isAdmin} vendor={vendor} />
           
           {/* Manage Subscription */}
           <ManageSubscription />

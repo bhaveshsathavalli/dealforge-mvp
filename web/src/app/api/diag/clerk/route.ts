@@ -18,6 +18,10 @@ export async function GET() {
     payload.data.orgId = ctx.orgId
     payload.data.role = ctx.role
     payload.data.canInvite = ctx.role === 'admin'
+    payload.data.roles = {
+      uiRole: ctx.role,
+      note: 'UI roles admin/member; mapped to org:admin/org:member when calling Clerk'
+    }
     if (ctx.orgId) {
       try {
         const client = await clerkClient()
