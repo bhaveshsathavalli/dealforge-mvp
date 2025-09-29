@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
+import { resolveOrgContext } from '@/server/orgContext';
 import { clerkClient } from '@clerk/nextjs/server';
 import { z } from 'zod';
 
 const updateRoleSchema = z.object({
-  role: z.enum(['org:admin', 'org:member'])
+  role: z.enum(['member', 'admin'])
 });
 
 export async function PATCH(
@@ -12,34 +12,24 @@ export async function PATCH(
   { params }: { params: { membershipId: string } }
 ) {
   try {
-    const { userId, orgId, sessionClaims } = await auth();
+    const ctx = await resolveOrgContext();
     
-    if (!userId) {
+    if (!ctx.ok) {
       return NextResponse.json({
         ok: false,
         error: { code: 'UNAUTHENTICATED', message: 'Not authenticated' }
       }, { status: 401 });
     }
 
-    if (!orgId) {
+    if (!ctx.orgId) {
       return NextResponse.json({
         ok: false,
         error: { code: 'NO_ORG', message: 'No organization selected' }
       }, { status: 400 });
     }
 
-    // Check if user is admin - FIX: Use proper role resolution
-    let userRole = sessionClaims?.org_role as string;
-    if (!userRole) {
-      const memberships = await clerkClient.organizations.getOrganizationMembershipList({
-        organizationId: orgId,
-        limit: 100
-      });
-      const me = memberships.data.find(m => m.publicUserData?.userId === userId);
-      userRole = me?.role || null;
-    }
-    
-    if (userRole !== 'org:admin' && userRole !== 'admin') {
+    // Require admin role
+    if (ctx.role !== 'admin') {
       return NextResponse.json({
         ok: false,
         error: { code: 'FORBIDDEN', message: 'Admin access required' }
@@ -56,28 +46,19 @@ export async function PATCH(
       }, { status: 400 });
     }
 
-    const { role } = validation.data;
     const { membershipId } = params;
+    const { role } = validation.data;
 
-    console.info('team.api', JSON.stringify({
-      route: 'PATCH /api/team/members/:membershipId',
-      evt: 'start',
-      orgId,
-      userId,
-      membershipId,
-      newRole: role
-    }));
+    // Map UI role to Clerk role
+    const mappedRole = role === 'admin' ? 'org:admin' : 'org:member';
 
-    await clerkClient.organizations.updateOrganizationMembership(membershipId, { role });
+    console.log('team.api', { evt: 'member.role.change', membershipId, role, mappedRole });
 
-    console.info('team.api', JSON.stringify({
-      route: 'PATCH /api/team/members/:membershipId',
-      evt: 'success',
-      orgId,
-      userId,
-      membershipId,
-      newRole: role
-    }));
+    // Update member role via Clerk
+    const client = await clerkClient();
+    await client.organizations.updateOrganizationMembership(membershipId, { role: mappedRole });
+
+    console.log('team.api', { evt: 'member.role.change', success: true });
 
     return NextResponse.json({
       ok: true,
@@ -88,10 +69,7 @@ export async function PATCH(
     const clerkError = error?.errors?.[0];
     
     console.error('team.api', JSON.stringify({
-      route: 'PATCH /api/team/members/:membershipId',
-      evt: 'error',
-      orgId: (await auth()).orgId,
-      userId: (await auth()).userId,
+      evt: 'member.role.change.error',
       membershipId: params.membershipId,
       code: clerkError?.code,
       message: clerkError?.message,
@@ -113,34 +91,24 @@ export async function DELETE(
   { params }: { params: { membershipId: string } }
 ) {
   try {
-    const { userId, orgId, sessionClaims } = await auth();
+    const ctx = await resolveOrgContext();
     
-    if (!userId) {
+    if (!ctx.ok) {
       return NextResponse.json({
         ok: false,
         error: { code: 'UNAUTHENTICATED', message: 'Not authenticated' }
       }, { status: 401 });
     }
 
-    if (!orgId) {
+    if (!ctx.orgId) {
       return NextResponse.json({
         ok: false,
         error: { code: 'NO_ORG', message: 'No organization selected' }
       }, { status: 400 });
     }
 
-    // Check if user is admin - FIX: Use proper role resolution
-    let userRole = sessionClaims?.org_role as string;
-    if (!userRole) {
-      const memberships = await clerkClient.organizations.getOrganizationMembershipList({
-        organizationId: orgId,
-        limit: 100
-      });
-      const me = memberships.data.find(m => m.publicUserData?.userId === userId);
-      userRole = me?.role || null;
-    }
-    
-    if (userRole !== 'org:admin' && userRole !== 'admin') {
+    // Require admin role
+    if (ctx.role !== 'admin') {
       return NextResponse.json({
         ok: false,
         error: { code: 'FORBIDDEN', message: 'Admin access required' }
@@ -149,23 +117,13 @@ export async function DELETE(
 
     const { membershipId } = params;
 
-    console.info('team.api', JSON.stringify({
-      route: 'DELETE /api/team/members/:membershipId',
-      evt: 'start',
-      orgId,
-      userId,
-      membershipId
-    }));
+    console.log('team.api', { evt: 'member.remove', membershipId });
 
-    await clerkClient.organizations.deleteOrganizationMembership(membershipId);
+    // Remove member via Clerk
+    const client = await clerkClient();
+    await client.organizations.deleteOrganizationMembership(membershipId);
 
-    console.info('team.api', JSON.stringify({
-      route: 'DELETE /api/team/members/:membershipId',
-      evt: 'success',
-      orgId,
-      userId,
-      membershipId
-    }));
+    console.log('team.api', { evt: 'member.remove', success: true });
 
     return NextResponse.json({
       ok: true,
@@ -176,10 +134,7 @@ export async function DELETE(
     const clerkError = error?.errors?.[0];
     
     console.error('team.api', JSON.stringify({
-      route: 'DELETE /api/team/members/:membershipId',
-      evt: 'error',
-      orgId: (await auth()).orgId,
-      userId: (await auth()).userId,
+      evt: 'member.remove.error',
       membershipId: params.membershipId,
       code: clerkError?.code,
       message: clerkError?.message,

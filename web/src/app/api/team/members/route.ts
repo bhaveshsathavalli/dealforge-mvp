@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { resolveOrgContext } from '@/server/orgContext';
-import { supabaseAdmin } from '@/server/supabaseAdmin';
+import { clerkClient } from '@clerk/nextjs/server';
 
 export async function GET() {
   try {
@@ -20,68 +20,49 @@ export async function GET() {
       });
     }
 
-    console.info('team.members', JSON.stringify({
-      evt: 'start',
-      orgId: ctx.orgId,
-      userId: ctx.userId
+    console.log('team.api', { evt: 'members.list', orgId: ctx.orgId, userId: ctx.userId });
+
+    // Get members from Clerk as single source of truth
+    const client = await clerkClient();
+    const memberships = await client.organizations.getOrganizationMembershipList({
+      organizationId: ctx.orgId,
+      limit: 100
+    });
+
+    const members = memberships.data.map(membership => ({
+      membershipId: membership.id,
+      userId: membership.publicUserData?.userId,
+      email: membership.publicUserData?.identifier || membership.publicUserData?.emailAddress || '',
+      name: membership.publicUserData?.firstName && membership.publicUserData?.lastName 
+        ? `${membership.publicUserData.firstName} ${membership.publicUserData.lastName}`
+        : membership.publicUserData?.firstName || membership.publicUserData?.identifier || '',
+      imageUrl: membership.publicUserData?.imageUrl || null,
+      role: membership.role,
+      createdAt: membership.createdAt
     }));
 
-    try {
-      // Query Supabase view v_org_team filtered by clerk_org_id
-      const { data: members, error } = await supabaseAdmin
-        .from('v_org_team')
-        .select('*')
-        .eq('clerk_org_id', ctx.orgId);
+    console.log('team.api', { evt: 'members.list', count: members.length });
 
-      if (error) {
-        console.error('team.members', JSON.stringify({
-          evt: 'db_error',
-          orgId: ctx.orgId,
-          error: error.message
-        }));
-
-        return NextResponse.json({
-          ok: false,
-          error: { code: 'DB_ERROR', message: error.message }
-        }, { status: 500 });
-      }
-
-      console.info('team.members', JSON.stringify({
-        evt: 'success',
-        orgId: ctx.orgId,
-        userId: ctx.userId,
-        count: members?.length || 0
-      }));
-
-      return NextResponse.json({
-        ok: true,
-        data: { members: members || [] }
-      });
-
-    } catch (dbError: any) {
-      console.error('team.members', JSON.stringify({
-        evt: 'db_exception',
-        orgId: ctx.orgId,
-        error: dbError.message
-      }));
-
-      return NextResponse.json({
-        ok: false,
-        error: { code: 'DB_ERROR', message: dbError.message }
-      }, { status: 500 });
-    }
+    return NextResponse.json({
+      ok: true,
+      data: { members }
+    });
 
   } catch (error: any) {
-    console.error('team.members', JSON.stringify({
-      evt: 'fatal',
-      error: error.message
+    const clerkError = error?.errors?.[0];
+    
+    console.error('team.api', JSON.stringify({
+      evt: 'members.error',
+      code: clerkError?.code,
+      message: clerkError?.message,
+      raw: error.message
     }));
 
     return NextResponse.json({
       ok: false,
       error: { 
-        code: 'FATAL_ERROR', 
-        message: 'Failed to fetch members'
+        code: clerkError?.code || 'CLERK_ERROR', 
+        message: clerkError?.message || 'Failed to fetch members'
       }
     }, { status: 500 });
   }

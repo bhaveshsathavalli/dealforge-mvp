@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
+import { resolveOrgContext } from '@/server/orgContext';
 import { clerkClient } from '@clerk/nextjs/server';
 
 export async function DELETE(
@@ -7,34 +7,24 @@ export async function DELETE(
   { params }: { params: { invitationId: string } }
 ) {
   try {
-    const { userId, orgId, sessionClaims } = await auth();
+    const ctx = await resolveOrgContext();
     
-    if (!userId) {
+    if (!ctx.ok) {
       return NextResponse.json({
         ok: false,
         error: { code: 'UNAUTHENTICATED', message: 'Not authenticated' }
       }, { status: 401 });
     }
 
-    if (!orgId) {
+    if (!ctx.orgId) {
       return NextResponse.json({
         ok: false,
         error: { code: 'NO_ORG', message: 'No organization selected' }
       }, { status: 400 });
     }
 
-    // Check if user is admin - FIX: Use proper role resolution
-    let userRole = sessionClaims?.org_role as string;
-    if (!userRole) {
-      const memberships = await clerkClient.organizations.getOrganizationMembershipList({
-        organizationId: orgId,
-        limit: 100
-      });
-      const me = memberships.data.find(m => m.publicUserData?.userId === userId);
-      userRole = me?.role || null;
-    }
-    
-    if (userRole !== 'org:admin' && userRole !== 'admin') {
+    // Require admin role
+    if (ctx.role !== 'admin') {
       return NextResponse.json({
         ok: false,
         error: { code: 'FORBIDDEN', message: 'Admin access required' }
@@ -43,23 +33,13 @@ export async function DELETE(
 
     const { invitationId } = params;
 
-    console.info('team.api', JSON.stringify({
-      route: 'DELETE /api/team/invitations/:invitationId',
-      evt: 'start',
-      orgId,
-      userId,
-      invitationId
-    }));
+    console.log('team.api', { evt: 'invites.revoke', invitationId, orgId: ctx.orgId });
 
-    await clerkClient.organizations.revokeOrganizationInvitation(invitationId);
+    // Revoke invitation via Clerk
+    const client = await clerkClient();
+    await client.organizations.revokeOrganizationInvitation(invitationId);
 
-    console.info('team.api', JSON.stringify({
-      route: 'DELETE /api/team/invitations/:invitationId',
-      evt: 'success',
-      orgId,
-      userId,
-      invitationId
-    }));
+    console.log('team.api', { evt: 'invites.revoke', success: true });
 
     return NextResponse.json({
       ok: true,
@@ -70,10 +50,7 @@ export async function DELETE(
     const clerkError = error?.errors?.[0];
     
     console.error('team.api', JSON.stringify({
-      route: 'DELETE /api/team/invitations/:invitationId',
-      evt: 'error',
-      orgId: (await auth()).orgId,
-      userId: (await auth()).userId,
+      evt: 'invites.revoke.error',
       invitationId: params.invitationId,
       code: clerkError?.code,
       message: clerkError?.message,

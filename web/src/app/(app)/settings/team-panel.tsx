@@ -5,7 +5,8 @@ import { useUser } from '@clerk/nextjs';
 import { readJsonSafely } from '@/lib/readJsonSafely';
 
 type MemberRow = {
-  membershipId: string; // FIX: Use membershipId for consistency
+  membershipId: string;
+  userId?: string;
   email: string;
   name: string;
   imageUrl?: string | null;
@@ -14,8 +15,8 @@ type MemberRow = {
 };
 
 type InvitationRow = {
-  id: string;
-  emailAddress: string;
+  invitationId: string;
+  email: string;
   role: 'org:admin' | 'org:member';
   status: string;
   createdAt: string;
@@ -76,7 +77,7 @@ export default function TeamPanel({ role }: TeamPanelProps) {
     const res = await fetch('/api/team/invitations', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email: inviteEmail, role: 'org:member' }),
+                        body: JSON.stringify({ email: inviteEmail, role: 'member' }),
     });
     
     const data = await readJsonSafely(res);
@@ -197,7 +198,7 @@ export default function TeamPanel({ role }: TeamPanelProps) {
                     {m.role === 'org:admin' ? 'Admin' : 'Member'}
                   </span>
 
-                  {isAdmin && user?.id !== m.membershipId && (
+                  {isAdmin && user?.id !== m.userId && (
                     <>
                       <select
                         className="text-sm border rounded px-2 py-1"
@@ -236,7 +237,7 @@ export default function TeamPanel({ role }: TeamPanelProps) {
                 data-testid="invite-row"
               >
                 <div>
-                  <div className="text-sm">{inv.emailAddress}</div>
+                  <div className="text-sm">{inv.email}</div>
                   <div className="text-xs text-gray-500">Invited {new Date(inv.createdAt).toLocaleDateString()}</div>
                 </div>
 
@@ -246,7 +247,7 @@ export default function TeamPanel({ role }: TeamPanelProps) {
                   </span>
 
                   <button
-                    onClick={() => cancelInvitation(inv.id)}
+                    onClick={() => cancelInvitation(inv.invitationId)}
                     className="text-sm text-red-600 hover:underline"
                     data-testid="invite-cancel"
                   >
@@ -274,10 +275,10 @@ export default function TeamPanel({ role }: TeamPanelProps) {
             <select
               className="border rounded px-3 py-2"
               data-testid="invite-role"
-              defaultValue="org:member"
+              defaultValue="member"
             >
-              <option value="org:member">Member</option>
-              <option value="org:admin">Admin</option>
+              <option value="member">Member</option>
+              <option value="admin">Admin</option>
             </select>
             <button 
               onClick={invite} 

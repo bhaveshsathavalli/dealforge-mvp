@@ -1,76 +1,49 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
+import { resolveOrgContext } from '@/server/orgContext';
 import { clerkClient } from '@clerk/nextjs/server';
 import { z } from 'zod';
 
 const inviteSchema = z.object({
   email: z.string().email('Invalid email address'),
-  role: z.enum(['org:member', 'org:admin']).optional().default('org:member'),
+  role: z.enum(['member', 'admin']).optional().default('member'),
 });
 
-export async function GET(req: Request) {
+export async function GET() {
   try {
-    const { userId, orgId, sessionClaims } = await auth();
+    const ctx = await resolveOrgContext();
     
-    if (!userId) {
+    if (!ctx.ok) {
       return NextResponse.json({
         ok: false,
         error: { code: 'UNAUTHENTICATED', message: 'Not authenticated' }
       }, { status: 401 });
     }
 
-    if (!orgId) {
+    if (!ctx.orgId) {
       return NextResponse.json({
-        ok: false,
-        error: { code: 'NO_ORG', message: 'No organization selected' }
-      }, { status: 400 });
-    }
-
-    // Check if user is admin - FIX: Use proper role resolution
-    let userRole = sessionClaims?.org_role as string;
-    if (!userRole) {
-      const memberships = await clerkClient.organizations.getOrganizationMembershipList({
-        organizationId: orgId,
-        limit: 100
+        ok: true,
+        data: { invitations: [] }
       });
-      const me = memberships.data.find(m => m.publicUserData?.userId === userId);
-      userRole = me?.role || null;
-    }
-    
-    if (userRole !== 'org:admin' && userRole !== 'admin') {
-      return NextResponse.json({
-        ok: false,
-        error: { code: 'FORBIDDEN', message: 'Admin access required' }
-      }, { status: 403 });
     }
 
-    console.info('team.api', JSON.stringify({
-      route: 'GET /api/team/invitations',
-      evt: 'start',
-      orgId,
-      userId
-    }));
+    console.log('team.api', { evt: 'invites.list', orgId: ctx.orgId });
 
-    const invitations = await clerkClient.organizations.getOrganizationInvitationList({
-      organizationId: orgId
+    // Get invitations from Clerk as single source of truth
+    const client = await clerkClient();
+    const invitations = await client.organizations.getOrganizationInvitationList({
+      organizationId: ctx.orgId
     });
 
     const formattedInvitations = invitations.data.map(invitation => ({
-      id: invitation.id,
-      emailAddress: invitation.emailAddress,
+      invitationId: invitation.id,
+      email: invitation.emailAddress,
       role: invitation.role,
       status: invitation.status,
       createdAt: invitation.createdAt,
       updatedAt: invitation.updatedAt
     }));
 
-    console.info('team.api', JSON.stringify({
-      route: 'GET /api/team/invitations',
-      evt: 'success',
-      orgId,
-      userId,
-      count: formattedInvitations.length
-    }));
+    console.log('team.api', { evt: 'invites.list', count: formattedInvitations.length });
 
     return NextResponse.json({
       ok: true,
@@ -81,10 +54,7 @@ export async function GET(req: Request) {
     const clerkError = error?.errors?.[0];
     
     console.error('team.api', JSON.stringify({
-      route: 'GET /api/team/invitations',
-      evt: 'error',
-      orgId: (await auth()).orgId,
-      userId: (await auth()).userId,
+      evt: 'invites.error',
       code: clerkError?.code,
       message: clerkError?.message,
       raw: error.message
@@ -102,34 +72,24 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const { userId, orgId, sessionClaims } = await auth();
+    const ctx = await resolveOrgContext();
     
-    if (!userId) {
+    if (!ctx.ok) {
       return NextResponse.json({
         ok: false,
         error: { code: 'UNAUTHENTICATED', message: 'Not authenticated' }
       }, { status: 401 });
     }
 
-    if (!orgId) {
+    if (!ctx.orgId) {
       return NextResponse.json({
         ok: false,
         error: { code: 'NO_ORG', message: 'No organization selected' }
       }, { status: 400 });
     }
 
-    // Check if user is admin - FIX: Use proper role resolution
-    let userRole = sessionClaims?.org_role as string;
-    if (!userRole) {
-      const memberships = await clerkClient.organizations.getOrganizationMembershipList({
-        organizationId: orgId,
-        limit: 100
-      });
-      const me = memberships.data.find(m => m.publicUserData?.userId === userId);
-      userRole = me?.role || null;
-    }
-    
-    if (userRole !== 'org:admin' && userRole !== 'admin') {
+    // Require admin role
+    if (ctx.role !== 'admin') {
       return NextResponse.json({
         ok: false,
         error: { code: 'FORBIDDEN', message: 'Admin access required' }
@@ -148,37 +108,27 @@ export async function POST(req: Request) {
 
     const { email, role } = validation.data;
 
-    console.info('team.api', JSON.stringify({
-      route: 'POST /api/team/invitations',
-      evt: 'start',
-      orgId,
-      userId,
-      email,
-      role
-    }));
+    // Map UI role to Clerk role
+    const mappedRole = role === 'admin' ? 'org:admin' : 'org:member';
 
-    const invitation = await clerkClient.organizations.createOrganizationInvitation({
-      organizationId: orgId,
+    console.log('team.api', { evt: 'invites.create', email, role, mappedRole, orgId: ctx.orgId });
+
+    // Create invitation via Clerk
+    const client = await clerkClient();
+    const invitation = await client.organizations.createOrganizationInvitation({
+      organizationId: ctx.orgId!,
       emailAddress: email,
-      role
+      role: mappedRole,
     });
 
-    console.info('team.api', JSON.stringify({
-      route: 'POST /api/team/invitations',
-      evt: 'success',
-      orgId,
-      userId,
-      email,
-      role,
-      invitationId: invitation.id
-    }));
+    console.log('team.api', { evt: 'invites.create', invitationId: invitation.id });
 
     return NextResponse.json({
       ok: true,
       data: { 
         invitation: {
-          id: invitation.id,
-          emailAddress: invitation.emailAddress,
+          invitationId: invitation.id,
+          email: invitation.emailAddress,
           role: invitation.role,
           status: invitation.status,
           createdAt: invitation.createdAt,
@@ -191,10 +141,7 @@ export async function POST(req: Request) {
     const clerkError = error?.errors?.[0];
     
     console.error('team.api', JSON.stringify({
-      route: 'POST /api/team/invitations',
-      evt: 'error',
-      orgId: (await auth()).orgId,
-      userId: (await auth()).userId,
+      evt: 'invites.create.error',
       code: clerkError?.code,
       message: clerkError?.message,
       raw: error.message
