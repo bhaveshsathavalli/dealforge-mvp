@@ -149,9 +149,8 @@ export async function PATCH(
       }
     }
 
-    // Use the correct Clerk SDK method
+    // Use the correct Clerk SDK method signature per tests
     await client.organizations.updateOrganizationMembership(membershipId, {
-      organizationId: ctx.orgId!,
       role: clerkRole,
     });
 
