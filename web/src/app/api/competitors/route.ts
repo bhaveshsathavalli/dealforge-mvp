@@ -2,6 +2,18 @@ import { NextResponse } from 'next/server';
 import { withOrgId } from '@/server/withOrg';
 import { supabaseServer } from '@/lib/supabaseServer';
 
+function normalizeUrl(raw: string) {
+  const s = (raw || "").trim();
+  if (!s) return "";
+  try {
+    const u = new URL(s.startsWith("http") ? s : `https://${s}`);
+    u.protocol = "https:";
+    return u.toString().replace(/\/$/, "");
+  } catch {
+    return "";
+  }
+}
+
 export const GET = withOrgId(async ({ orgId, role }) => {
   try {
     const sb = supabaseServer();
@@ -45,12 +57,13 @@ export const POST = withOrgId(async ({ orgId, role }, req: Request) => {
     if (contentType?.includes('application/json')) {
       const body = await req.json();
       name = String(body.name ?? '').trim();
-      website = body.website ? String(body.website).trim() : undefined;
+      website = body.website ? normalizeUrl(String(body.website)) : undefined;
       aliases = Array.isArray(body.aliases) ? body.aliases : [];
     } else {
       const formData = await req.formData();
       name = String(formData.get('name') ?? '').trim();
-      website = String(formData.get('website') ?? '').trim() || undefined;
+      const rawWebsite = String(formData.get('website') ?? '').trim();
+      website = rawWebsite ? normalizeUrl(rawWebsite) : undefined;
       const aliasesString = String(formData.get('aliases') ?? '').trim();
       aliases = aliasesString ? aliasesString.split(',').map(a => a.trim()).filter(a => a) : [];
     }

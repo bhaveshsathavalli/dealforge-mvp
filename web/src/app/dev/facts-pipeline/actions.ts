@@ -56,6 +56,18 @@ export async function clearCooldownAction() {
   finishRun(orgUuid);
 }
 
+function normalizeUrl(raw: string) {
+  const s = (raw || "").trim();
+  if (!s) return "";
+  try {
+    const u = new URL(s.startsWith("http") ? s : `https://${s}`);
+    u.protocol = "https:";
+    return u.toString().replace(/\/$/, "");
+  } catch {
+    return "";
+  }
+}
+
 export async function addTestCompetitorAction(formData: FormData) {
   const { orgUuid } = await getOrgUuidFromClerk();
   const name = formData.get("name") as string;
@@ -65,12 +77,14 @@ export async function addTestCompetitorAction(formData: FormData) {
     throw new Error("Competitor name is required");
   }
   
+  const normalizedWebsite = website?.trim() ? normalizeUrl(website.trim()) : null;
+  
   const { data: competitor, error } = await supabaseAdmin
     .from("competitors")
     .insert({
       org_id: orgUuid,
       name: name.trim(),
-      website: website?.trim() || null,
+      website: normalizedWebsite,
       active: true
     })
     .select("id, name, website")

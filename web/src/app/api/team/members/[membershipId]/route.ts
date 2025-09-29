@@ -156,9 +156,40 @@ export async function PATCH(
     }
 
     // Use the correct Clerk SDK method signature per tests
+    // First, find the userId for this membershipId
+    const membershipList = await client.organizations.getOrganizationMembershipList({
+      organizationId: ctx.orgId!,
+      limit: 200
+    });
+    
+    const targetMembership = membershipList.data.find(m => m.id === membershipId);
+    if (!targetMembership) {
+      console.log('team.api', JSON.stringify({
+        evt: 'membership_not_found',
+        membershipId
+      }));
+      return NextResponse.json({
+        ok: false,
+        error: { code: 'MEMBER_NOT_FOUND', message: 'Member not found' }
+      }, { status: 404 });
+    }
+    
+    const userId = targetMembership.publicUserData?.userId;
+    if (!userId) {
+      console.log('team.api', JSON.stringify({
+        evt: 'user_id_not_found',
+        membershipId
+      }));
+      return NextResponse.json({
+        ok: false,
+        error: { code: 'USER_ID_NOT_FOUND', message: 'User ID not found for member' }
+      }, { status: 404 });
+    }
+    
     console.log('team.api', JSON.stringify({
       evt: 'about_to_call_update',
       membershipId,
+      userId,
       clerkRole,
       methodExists: typeof client.organizations.updateOrganizationMembership === 'function'
     }));
@@ -166,7 +197,7 @@ export async function PATCH(
     try {
       const updateResult = await client.organizations.updateOrganizationMembership({
         organizationId: ctx.orgId!,
-        organizationMembershipId: membershipId,
+        userId: userId, // CORRECT: Use actual userId
         role: clerkRole,
       });
       
@@ -325,16 +356,47 @@ export async function DELETE(
     }
 
     // Use the correct Clerk SDK method
+    // For DELETE, also need to find userId from membershipId
+    const membershipList2 = await client.organizations.getOrganizationMembershipList({
+      organizationId: ctx.orgId!,
+      limit: 200
+    });
+    
+    const targetMembership2 = membershipList2.data.find(m => m.id === membershipId);
+    if (!targetMembership2) {
+      console.log('team.api', JSON.stringify({
+        evt: 'membership_not_found_delete',
+        membershipId
+      }));
+      return NextResponse.json({
+        ok: false,
+        error: { code: 'MEMBER_NOT_FOUND', message: 'Member not found' }
+      }, { status: 404 });
+    }
+    
+    const userIdForDelete = targetMembership2.publicUserData?.userId;
+    if (!userIdForDelete) {
+      console.log('team.api', JSON.stringify({
+        evt: 'user_id_not_found_delete',
+        membershipId
+      }));
+      return NextResponse.json({
+        ok: false,
+        error: { code: 'USER_ID_NOT_FOUND', message: 'User ID not found for member' }
+      }, { status: 404 });
+    }
+    
     console.log('team.api', JSON.stringify({
       evt: 'about_to_call_delete',
       membershipId,
+      userId: userIdForDelete,
       methodExists: typeof client.organizations.deleteOrganizationMembership === 'function'
     }));
     
     try {
       const deleteResult = await client.organizations.deleteOrganizationMembership({
         organizationId: ctx.orgId!,
-        organizationMembershipId: membershipId,
+        userId: userIdForDelete, // CORRECT: Use actual userId
       });
       
       console.log('team.api', JSON.stringify({

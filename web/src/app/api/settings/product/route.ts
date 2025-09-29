@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/server/supabaseAdmin";
 import { withOrg } from "@/server/withOrg";
 
-function normalizeUrl(url: string) {
-  const s = (url || "").trim();
+function normalizeUrl(raw: string) {
+  const s = (raw || "").trim();
   if (!s) return "";
   try {
     const u = new URL(s.startsWith("http") ? s : `https://${s}`);
@@ -16,11 +16,9 @@ function normalizeUrl(url: string) {
 
 async function readBody(req: Request) {
   const ct = req.headers.get("content-type") || "";
-
   if (ct.includes("application/json")) {
     try { return await req.json(); } catch { return {}; }
   }
-
   if (ct.includes("application/x-www-form-urlencoded") || ct.includes("multipart/form-data")) {
     const fd = await req.formData();
     return {
@@ -28,8 +26,6 @@ async function readBody(req: Request) {
       website: String(fd.get("product_website") ?? fd.get("website") ?? ""),
     };
   }
-
-  // Fallback: try parsing as URLSearchParams
   const txt = await req.text();
   try {
     const p = new URLSearchParams(txt);
@@ -55,7 +51,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "name and website are required" }, { status: 400 });
     }
 
-    // Use earliest vendor row for this org; update or insert
+    // Update earliest vendor row for this org; or insert if none exists
     const { data: existing, error: findErr } = await supabase
       .from("vendors")
       .select("id")
@@ -77,15 +73,13 @@ export async function POST(req: Request) {
       if (insErr) throw insErr;
     }
 
-    // Redirect back to Settings → General (303 = See Other)
-    const back = new URL("/settings?tab=general", req.url);
-    return NextResponse.redirect(back, { status: 303 });
+    return NextResponse.redirect(new URL("/settings?tab=general", req.url), { status: 303 });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? "unknown error" }, { status: 500 });
   }
 }
 
-// Optional GET for quick sanity checks of current vendor
+// Optional: GET for debugging the current vendor row
 export async function GET(req: Request) {
   try {
     const { orgId } = await withOrg();
