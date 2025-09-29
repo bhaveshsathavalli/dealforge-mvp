@@ -119,6 +119,12 @@ export async function PATCH(
     }));
 
     const client = await clerkClient();
+    console.log('team.api', JSON.stringify({
+      evt: 'client_created',
+      clientType: typeof client,
+      hasOrganizations: !!client.organizations,
+      organizationsMethods: client.organizations ? Object.keys(client.organizations) : 'none'
+    }));
     
     // Check if this is the last admin before changing
     if (role === 'member') {
@@ -150,9 +156,34 @@ export async function PATCH(
     }
 
     // Use the correct Clerk SDK method signature per tests
-    await client.organizations.updateOrganizationMembership(membershipId, {
-      role: clerkRole,
-    });
+    console.log('team.api', JSON.stringify({
+      evt: 'about_to_call_update',
+      membershipId,
+      clerkRole,
+      methodExists: typeof client.organizations.updateOrganizationMembership === 'function'
+    }));
+    
+    try {
+      const updateResult = await client.organizations.updateOrganizationMembership(membershipId, {
+        role: clerkRole,
+      });
+      
+      console.log('team.api', JSON.stringify({
+        evt: 'update_organization_membership_success',
+        updateResult: !!updateResult
+      }));
+    } catch (updateError: any) {
+      console.error('team.api', JSON.stringify({
+        evt: 'update_organization_membership_error',
+        error: updateError.message,
+        code: updateError?.code,
+        clerkErrors: updateError?.errors,
+        status: updateError?.status,
+        membershipId,
+        clerkRole
+      }));
+      throw updateError;
+    }
 
     const successResult = {
       evt: 'result',
@@ -292,7 +323,30 @@ export async function DELETE(
     }
 
     // Use the correct Clerk SDK method
-    await client.organizations.deleteOrganizationMembership(membershipId);
+    console.log('team.api', JSON.stringify({
+      evt: 'about_to_call_delete',
+      membershipId,
+      methodExists: typeof client.organizations.deleteOrganizationMembership === 'function'
+    }));
+    
+    try {
+      const deleteResult = await client.organizations.deleteOrganizationMembership(membershipId);
+      
+      console.log('team.api', JSON.stringify({
+        evt: 'delete_organization_membership_success',
+        deleteResult: !!deleteResult
+      }));
+    } catch (deleteError: any) {
+      console.error('team.api', JSON.stringify({
+        evt: 'delete_organization_membership_error',
+        error: deleteError.message,
+        code: deleteError?.code,
+        clerkErrors: deleteError?.errors,
+        status: deleteError?.status,
+        membershipId
+      }));
+      throw deleteError;
+    }
 
     const successResult = {
       evt: 'result',
