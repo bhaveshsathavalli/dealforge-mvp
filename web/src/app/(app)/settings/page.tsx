@@ -82,60 +82,105 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
 
   // If no organization found, try to ensure it exists
   if (!data) {
-    try {
-      console.log('Organization not found in database, attempting to ensure it exists...');
-      await ensureOrg({ clerkOrgId });
-      
-      // Re-fetch the organization data
-      const { data: retryData, error: retryError } = await supabaseAdmin
-        .from("orgs")
-        .select("id, name, product_name, product_website, plan_type, max_users, max_competitors")
-        .eq('clerk_org_id', clerkOrgId)
-        .single();
-        
-      if (retryError || !retryData) {
-        return (
-          <div className="p-6">
-            <h1 className="text-2xl font-semibold mb-4">Settings</h1>
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-              <h2 className="text-lg font-semibold text-yellow-800 mb-2">Organization Not Found</h2>
-              <p className="text-yellow-700 mb-4">
-                We couldn't find your organization in our database. This might happen if your organization was recently created or if there was a synchronization issue.
-              </p>
-              <div className="space-y-2">
-                <p className="text-sm text-yellow-600">
-                  Please try the following:
+    console.log('Organization not found in database, attempting to ensure it exists...');
+    const ensureResult = await ensureOrg();
+    
+    if (!ensureResult.ok) {
+      // Handle different error cases with appropriate UI states
+      switch (ensureResult.code) {
+        case 'UNAUTHENTICATED':
+          redirect('/sign-in');
+          break;
+          
+        case 'NO_ACTIVE_ORG':
+          return (
+            <div className="p-6">
+              <h1 className="text-2xl font-semibold mb-4">Settings</h1>
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <h2 className="text-lg font-semibold text-blue-800 mb-2">Select an Organization</h2>
+                <p className="text-blue-700 mb-4">
+                  Please select or create an organization to manage your settings.
                 </p>
-                <ul className="text-sm text-yellow-600 list-disc list-inside space-y-1">
-                  <li>Refresh this page to retry the synchronization</li>
-                  <li>Go to the <a href="/dashboard" className="underline hover:text-yellow-800">Dashboard</a> to re-select your organization</li>
-                  <li>Contact support if the issue persists</li>
-                </ul>
+                <a 
+                  href="/dashboard" 
+                  className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                >
+                  Go to Dashboard
+                </a>
               </div>
             </div>
-          </div>
-        );
+          );
+          
+        case 'ORG_NOT_FOUND':
+          return (
+            <div className="p-6">
+              <h1 className="text-2xl font-semibold mb-4">Settings</h1>
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <h2 className="text-lg font-semibold text-yellow-800 mb-2">Organization Not Found</h2>
+                <p className="text-yellow-700 mb-4">
+                  We couldn't find this organization. Please re-select your organization.
+                </p>
+                <a 
+                  href="/dashboard" 
+                  className="inline-flex items-center px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700"
+                >
+                  Re-select Organization
+                </a>
+              </div>
+            </div>
+          );
+          
+        case 'CLERK_ERROR':
+        case 'DB_ERROR':
+        case 'FATAL_ERROR':
+        default:
+          return (
+            <div className="p-6">
+              <h1 className="text-2xl font-semibold mb-4">Settings</h1>
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <h2 className="text-lg font-semibold text-red-800 mb-2">Synchronization Error</h2>
+                <p className="text-red-700 mb-4">
+                  We encountered an error while trying to synchronize your organization data.
+                </p>
+                <div className="space-y-2">
+                  <p className="text-sm text-red-600">
+                    Please try the following:
+                  </p>
+                  <ul className="text-sm text-red-600 list-disc list-inside space-y-1">
+                    <li>Refresh this page to retry</li>
+                    <li>Go to the <a href="/dashboard" className="underline hover:text-red-800">Dashboard</a> to re-select your organization</li>
+                    <li>Contact support if the issue persists</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          );
       }
+    }
+    
+    // Re-fetch the organization data after successful ensure
+    const { data: retryData, error: retryError } = await supabaseAdmin
+      .from("orgs")
+      .select("id, name, product_name, product_website, plan_type, max_users, max_competitors")
+      .eq('clerk_org_id', clerkOrgId)
+      .single();
       
-      // Use the retried data
-      var org = retryData;
-    } catch (ensureError) {
-      console.error('Failed to ensure organization:', ensureError);
+    if (retryError || !retryData) {
       return (
         <div className="p-6">
           <h1 className="text-2xl font-semibold mb-4">Settings</h1>
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-            <h2 className="text-lg font-semibold text-red-800 mb-2">Synchronization Error</h2>
-            <p className="text-red-700 mb-4">
-              We encountered an error while trying to synchronize your organization data.
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+            <h2 className="text-lg font-semibold text-yellow-800 mb-2">Organization Not Found</h2>
+            <p className="text-yellow-700 mb-4">
+              We couldn't find your organization in our database. This might happen if your organization was recently created or if there was a synchronization issue.
             </p>
             <div className="space-y-2">
-              <p className="text-sm text-red-600">
+              <p className="text-sm text-yellow-600">
                 Please try the following:
               </p>
-              <ul className="text-sm text-red-600 list-disc list-inside space-y-1">
-                <li>Refresh this page to retry</li>
-                <li>Go to the <a href="/dashboard" className="underline hover:text-red-800">Dashboard</a> to re-select your organization</li>
+              <ul className="text-sm text-yellow-600 list-disc list-inside space-y-1">
+                <li>Refresh this page to retry the synchronization</li>
+                <li>Go to the <a href="/dashboard" className="underline hover:text-yellow-800">Dashboard</a> to re-select your organization</li>
                 <li>Contact support if the issue persists</li>
               </ul>
             </div>
@@ -143,6 +188,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
         </div>
       );
     }
+    
+    // Use the retried data
+    var org = retryData;
   } else {
     var org = data;
   }
