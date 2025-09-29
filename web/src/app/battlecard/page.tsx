@@ -40,6 +40,8 @@ export default function BattlecardPage() {
   const [data, setData] = useState<BattlecardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<any>(null);
+  const [pipelineHealth, setPipelineHealth] = useState<any>(null);
   const [selectedPersona, setSelectedPersona] = useState<'AE' | 'SE' | 'Exec'>('AE');
 
   useEffect(() => {
@@ -57,24 +59,36 @@ export default function BattlecardPage() {
     }
   }, [isLoaded, userId, vendorId]);
 
-  const fetchBattlecardData = async () => {
+    const fetchBattlecardData = async () => {
     if (!vendorId) return;
     
     setLoading(true);
     setError(null);
+    setErrorDetails(null);
     
     try {
       console.log('Fetching battlecard data for vendor:', vendorId);
       const response = await fetch(`/api/vendors/${vendorId}/battlecard`);
       
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Battlecard API error:', response.status, errorText);
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      const result = await response.json();
+      console.log('Battlecard API response:', result);
+      
+      if (!response.ok || result.ok === false) {
+        setError(`HTTP ${response.status}: ${result.error || 'Unknown error'}`);
+        setErrorDetails(result);
+        
+        // Fetch pipeline health for debugging
+        try {
+          const healthResponse = await fetch('/api/diag/pipeline');
+          const healthData = await healthResponse.json();
+          setPipelineHealth(healthData);
+        } catch (healthErr) {
+          console.error('Failed to fetch pipeline health:', healthErr);
+        }
+        
+        return;
       }
       
-      const result = await response.json();
-      console.log('Battlecard data received:', result);
       setData(result);
     } catch (err: any) {
       console.error('Error fetching battlecard data:', err);
@@ -151,7 +165,55 @@ export default function BattlecardPage() {
   }
 
   if (error) {
-    return <div className="p-8 text-red-600">Error: {error}</div>;
+    return (
+      <div className="p-8">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+          <h2 className="text-xl font-semibold text-red-800 mb-2">Battlecard Error</h2>
+          <p className="text-red-600 mb-4">{error}</p>
+          
+          {errorDetails && (
+            <div className="mb-4">
+              <details className="mb-2">
+                <summary className="cursor-pointer text-red-700 font-medium">Error Details</summary>
+                <pre className="mt-2 p-3 bg-red-100 rounded text-xs text-red-800 overflow-auto">
+                  {JSON.stringify(errorDetails, null, 2)}
+                </pre>
+              </details>
+            </div>
+          )}
+          
+          {pipelineHealth && (
+            <div className="mt-4">
+              <details>
+                <summary className="cursor-pointer text-red-700 font-medium">Pipeline Health</summary>
+                <div className="mt-2 p-3 bg-gray-100 rounded text-xs">
+                  <h4 className="font-semibold mb-2">System Status:</h4>
+                  <p><strong>Org ID:</strong> {pipelineHealth.orgId || 'null'}</p>
+                  <p><strong>Vendor Count:</strong> {pipelineHealth.vendorCount}</p>
+                  <p><strong>Facts by Metric:</strong></p>
+                  <pre className="bg-white p-2 rounded text-xs mt-1">
+                    {JSON.stringify(pipelineHealth.factsByMetric, null, 2)}
+                  </pre>
+                  <p><strong>Flags:</strong></p>
+                  <pre className="bg-white p-2 rounded text-xs mt-1">
+                    {JSON.stringify(pipelineHealth.flags, null, 2)}
+                  </pre>
+                </div>
+              </details>
+            </div>
+          )}
+          
+          <div className="mt-4 pt-4 border-t border-red-200">
+            <button 
+              onClick={() => fetchBattlecardData()}
+              className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (!data) {

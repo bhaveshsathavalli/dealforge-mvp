@@ -2,15 +2,30 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withOrgId } from '@/server/withOrg';
 import { supabaseServer } from '@/lib/supabaseServer';
 import { composeNarrative } from '@/lib/compose';
+import { ok, err } from '@/server/util/apiJson';
+import crypto from 'crypto';
 
 export const POST = withOrgId(async ({ orgId }, request: NextRequest, { params }: { params: { id: string } }) => {
+  const traceId = crypto.randomUUID();
+  
+  // Validate UUID param
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(params.id)) {
+    return err(400, 'Invalid vendor ID format', { id: params.id });
+  }
+
+  // Validate active org
+  if (!orgId) {
+    return err(401, 'No active organization', { traceId });
+  }
+
   try {
     // Get request body
     const body = await request.json();
     const { persona }: { persona: 'AE' | 'SE' | 'Exec' } = body;
 
     if (!persona || !['AE', 'SE', 'Exec'].includes(persona)) {
-      return NextResponse.json({ error: 'Invalid persona' }, { status: 400 });
+      return err(400, 'Invalid persona. Must be one of: AE, SE, Exec', { persona, traceId });
     }
 
     const sb = supabaseServer();
@@ -24,7 +39,7 @@ export const POST = withOrgId(async ({ orgId }, request: NextRequest, { params }
       .single();
 
     if (vendorError || !vendor) {
-      return NextResponse.json({ error: 'Vendor not found' }, { status: 404 });
+      return err(404, 'Vendor not found in organization', { id: params.id, traceId });
     }
 
     // Get facts for composition (only structured data, no raw page text)
@@ -32,16 +47,17 @@ export const POST = withOrgId(async ({ orgId }, request: NextRequest, { params }
       .from('facts')
       .select('*')
       .eq('vendor_id', params.id)
+      .eq('org_id', orgId) // Add org filter
       .not('text_summary', 'is', null)
       .order('fact_score', { ascending: false })
       .limit(50); // Limit to top 50 facts to avoid token limits
 
     if (factsError) {
-      return NextResponse.json({ error: 'Failed to fetch facts' }, { status: 500 });
+      return err(500, 'Failed to fetch facts', { error: factsError.message, traceId });
     }
 
     if (!facts || facts.length === 0) {
-      return NextResponse.json({ error: 'No facts available for composition' }, { status: 400 });
+      return err(400, 'No facts available for composition', { traceId });
     }
 
     // Compose narrative using LLM
@@ -161,21 +177,22 @@ export const POST = withOrgId(async ({ orgId }, request: NextRequest, { params }
 
       if (insertError) {
         console.error('Error inserting bullets:', insertError);
-        return NextResponse.json({ error: 'Failed to save narrative' }, { status: 500 });
+        return err(500, 'Failed to save narrative', { error: insertError.message, traceId });
       }
     }
 
-    return NextResponse.json({
+    return ok({
       success: true,
       narrative,
-      bulletsSaved: bullets.length
+      bulletsSaved: bullets.length,
+      debug: { traceId }
     });
 
   } catch (error) {
     console.error('Compose endpoint error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return err(500, 'Internal server error', { 
+      traceId, 
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
   }
 }

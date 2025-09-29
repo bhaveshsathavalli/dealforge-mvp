@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withOrgId } from '@/server/withOrg';
 import { supabaseServer } from '@/lib/supabaseServer';
+import { ok, err } from '@/server/util/apiJson';
+import crypto from 'crypto';
 
 // Helper functions
 function computeHeatmap(features: any[]): any[] {
@@ -55,6 +57,19 @@ function composeNarrativeFromBullets(bullets: any[]): any {
 }
 
 export const GET = withOrgId(async ({ orgId }, request: NextRequest, { params }: { params: { id: string } }) => {
+  const traceId = crypto.randomUUID();
+  
+  // Validate UUID param
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(params.id)) {
+    return err(400, 'Invalid vendor ID format', { id: params.id });
+  }
+
+  // Validate active org
+  if (!orgId) {
+    return err(401, 'No active organization', { traceId });
+  }
+
   try {
     const sb = supabaseServer();
 
@@ -67,62 +82,84 @@ export const GET = withOrgId(async ({ orgId }, request: NextRequest, { params }:
       .single();
 
     if (vendorError || !vendor) {
-      return NextResponse.json({ error: 'Vendor not found' }, { status: 404 });
+      return err(404, 'Vendor not found in organization', { id: params.id, traceId });
     }
 
-    // Get facts by lane
-    const { data: facts, error: factsError } = await sb
-      .from('facts')
-      .select('*')
-      .eq('vendor_id', params.id)
-      .order('metric', { ascending: true });
+    // Get facts by lane with individual error handling
+    const laneQueries = ['pricing', 'features', 'integrations', 'security', 'changelog'];
+    const lanes: any = {};
+    const laneErrors: any = {};
 
-    if (factsError) {
-      return NextResponse.json({ error: 'Failed to fetch facts' }, { status: 500 });
+    for (const metric of laneQueries) {
+      try {
+        const { data: facts, error: factsError } = await sb
+          .from('facts')
+          .select('*')
+          .eq('vendor_id', params.id)
+          .eq('org_id', orgId) // Add org filter
+          .eq('metric', metric);
+
+        if (factsError) {
+          laneErrors[metric] = factsError.message;
+          lanes[metric] = [];
+        } else {
+          lanes[metric] = facts || [];
+        }
+      } catch (laneError) {
+        laneErrors[metric] = laneError instanceof Error ? laneError.message : 'Unknown error';
+        lanes[metric] = [];
+      }
     }
 
     // Organize facts by lane
-    const lanes = {
-      pricing: facts?.filter(f => f.metric === 'pricing') || [],
-      features: facts?.filter(f => f.metric === 'features') || [],
-      integrations: facts?.filter(f => f.metric === 'integrations') || [],
+    const organizedLanes = {
+      pricing: lanes.pricing || [],
+      features: lanes.features || [],
+      integrations: lanes.integrations || [],
       trust: {
-        badges: facts?.filter(f => f.metric === 'security' && f.value_json?.badge) || [],
-        links: facts?.filter(f => f.metric === 'security' && f.value_json?.url) || []
+        badges: lanes.security?.filter((f: any) => f.value_json?.badge) || [],
+        links: lanes.security?.filter((f: any) => f.value_json?.url) || []
       },
-      changelog: facts?.filter(f => f.metric === 'changelog') || []
+      changelog: lanes.changelog || []
     };
 
     // Compute heatmap from features
-    const heatmap = computeHeatmap(lanes.features);
+    const heatmap = computeHeatmap(organizedLanes.features);
 
     // Get existing narrative from battlecard_bullets
-    const { data: bullets } = await sb
-      .from('battlecard_bullets')
-      .select('*')
-      .eq('run_id', params.id) // Using vendor ID as run_id for now
-      .order('section', { ascending: true });
+    let narrative;
+    try {
+      const { data: bullets } = await sb
+        .from('battlecard_bullets')
+        .select('*')
+        .eq('run_id', params.id) // Using vendor ID as run_id for now
+        .order('section', { ascending: true });
 
-    const narrative = bullets ? composeNarrativeFromBullets(bullets) : undefined;
+      narrative = bullets ? composeNarrativeFromBullets(bullets) : undefined;
+    } catch (narrativeError) {
+      console.error('Battlecard narrative query failed:', narrativeError);
+      narrative = undefined;
+    }
 
-    const response = {
-      pricing: lanes.pricing,
-      features: lanes.features,
-      integrations: lanes.integrations,
-      trust: lanes.trust,
-      changelog: lanes.changelog,
+    return ok({
+      pricing: organizedLanes.pricing,
+      features: organizedLanes.features,
+      integrations: organizedLanes.integrations,
+      trust: organizedLanes.trust,
+      changelog: organizedLanes.changelog,
       heatmap,
-      narrative
-    };
-
-    return NextResponse.json(response);
+      narrative,
+      debug: {
+        laneErrors: Object.keys(laneErrors).length > 0 ? laneErrors : undefined,
+        traceId
+      }
+    });
 
   } catch (error) {
-    console.error('Battlecard endpoint error:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return NextResponse.json(
-      { error: `Internal server error: ${errorMessage}` },
-      { status: 500 }
-    );
+    console.error('Battlecard.get', error);
+    return err(500, 'Internal server error', { 
+      traceId, 
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
   }
 });

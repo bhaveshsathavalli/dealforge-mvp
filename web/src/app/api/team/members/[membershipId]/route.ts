@@ -164,7 +164,9 @@ export async function PATCH(
     }));
     
     try {
-      const updateResult = await client.organizations.updateOrganizationMembership(membershipId, {
+      const updateResult = await client.organizations.updateOrganizationMembership({
+        organizationId: ctx.orgId!,
+        organizationMembershipId: membershipId,
         role: clerkRole,
       });
       
@@ -330,7 +332,10 @@ export async function DELETE(
     }));
     
     try {
-      const deleteResult = await client.organizations.deleteOrganizationMembership(membershipId);
+      const deleteResult = await client.organizations.deleteOrganizationMembership({
+        organizationId: ctx.orgId!,
+        organizationMembershipId: membershipId,
+      });
       
       console.log('team.api', JSON.stringify({
         evt: 'delete_organization_membership_success',
