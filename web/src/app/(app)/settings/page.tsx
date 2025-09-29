@@ -49,161 +49,117 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
     }
   }
 
-  // Get organization data using service role with maybeSingle for resilience
-  const { data, error } = await supabaseAdmin
+  // Single source of truth: ensureOrg() handles all org validation and creation
+  console.log('settings.page', { evt: 'calling_ensureOrg' });
+  const res = await ensureOrg();
+  
+  if (!res.ok) {
+    console.log('settings.page', { evt: 'ensureOrg_failed', code: res.code });
+    
+    // Handle different error cases with appropriate UI states
+    switch (res.code) {
+      case 'UNAUTHENTICATED':
+        redirect('/sign-in');
+        break;
+        
+      case 'NO_ACTIVE_ORG':
+        return (
+          <div className="p-6">
+            <h1 className="text-2xl font-semibold mb-4">Settings</h1>
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <h2 className="text-lg font-semibold text-blue-800 mb-2">Select an Organization</h2>
+              <p className="text-blue-700 mb-4">
+                Please select or create an organization to manage your settings.
+              </p>
+              <a 
+                href="/dashboard" 
+                className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+              >
+                Go to Dashboard
+              </a>
+            </div>
+          </div>
+        );
+        
+      case 'ORG_NOT_FOUND':
+        return (
+          <div className="p-6">
+            <h1 className="text-2xl font-semibold mb-4">Settings</h1>
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+              <h2 className="text-lg font-semibold text-yellow-800 mb-2">Organization Not Found</h2>
+              <p className="text-yellow-700 mb-4">
+                We couldn't find this organization. Please re-select your organization.
+              </p>
+              <a 
+                href="/dashboard" 
+                className="inline-flex items-center px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700"
+              >
+                Re-select Organization
+              </a>
+            </div>
+          </div>
+        );
+        
+      case 'CLERK_ERROR':
+      case 'DB_ERROR':
+      case 'FATAL_ERROR':
+      default:
+        return (
+          <div className="p-6">
+            <h1 className="text-2xl font-semibold mb-4">Settings</h1>
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <h2 className="text-lg font-semibold text-red-800 mb-2">Synchronization Error</h2>
+              <p className="text-red-700 mb-4">
+                We encountered an error while trying to synchronize your organization data.
+              </p>
+              <div className="space-y-2">
+                <p className="text-sm text-red-600">
+                  Please try the following:
+                </p>
+                <ul className="text-sm text-red-600 list-disc list-inside space-y-1">
+                  <li>Refresh this page to retry</li>
+                  <li>Go to the <a href="/dashboard" className="underline hover:text-red-800">Dashboard</a> to re-select your organization</li>
+                  <li>Contact support if the issue persists</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        );
+    }
+  }
+  
+  // res.ok === true - proceed with Settings UI
+  console.log('settings.page', { evt: 'ensureOrg_success', orgId: res.orgId, role: res.role });
+  
+  // Get organization data for the UI (don't fail if this fails)
+  const { data: orgData, error: orgError } = await supabaseAdmin
     .from("orgs")
     .select("id, name, product_name, product_website, plan_type, max_users, max_competitors")
     .eq('clerk_org_id', clerkOrgId)
     .maybeSingle();
     
   // Ensure default product values if they're empty (idempotent & cheap)
-  if (data?.id) {
+  if (orgData?.id) {
     try { 
-      await ensureOrgProductDefaults(supabaseAdmin, data.id); 
+      await ensureOrgProductDefaults(supabaseAdmin, orgData.id); 
     } catch (e) { 
       console.warn('Failed to ensure org product defaults:', e);
     }
   }
-    
-  if (error) {
-    return (
-      <div className="p-6">
-        <h1 className="text-2xl font-semibold mb-4">Settings</h1>
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <h2 className="text-lg font-semibold text-red-800 mb-2">Error Loading Organization</h2>
-          <p className="text-red-700">{error.message}</p>
-          <p className="text-sm text-red-600 mt-2">
-            Please try refreshing the page or contact support if the issue persists.
-          </p>
-        </div>
-      </div>
-    );
-  }
+  
+  // Use orgData if available, otherwise use basic info from ensureOrg
+  const org = orgData || {
+    id: res.orgId!,
+    name: 'Organization',
+    product_name: '',
+    product_website: '',
+    plan_type: 'free',
+    max_users: 5,
+    max_competitors: 10
+  };
 
-  // If no organization found, try to ensure it exists
-  if (!data) {
-    console.log('Organization not found in database, attempting to ensure it exists...');
-    const ensureResult = await ensureOrg();
-    
-    if (!ensureResult.ok) {
-      // Handle different error cases with appropriate UI states
-      switch (ensureResult.code) {
-        case 'UNAUTHENTICATED':
-          redirect('/sign-in');
-          break;
-          
-        case 'NO_ACTIVE_ORG':
-          return (
-            <div className="p-6">
-              <h1 className="text-2xl font-semibold mb-4">Settings</h1>
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <h2 className="text-lg font-semibold text-blue-800 mb-2">Select an Organization</h2>
-                <p className="text-blue-700 mb-4">
-                  Please select or create an organization to manage your settings.
-                </p>
-                <a 
-                  href="/dashboard" 
-                  className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                >
-                  Go to Dashboard
-                </a>
-              </div>
-            </div>
-          );
-          
-        case 'ORG_NOT_FOUND':
-          return (
-            <div className="p-6">
-              <h1 className="text-2xl font-semibold mb-4">Settings</h1>
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                <h2 className="text-lg font-semibold text-yellow-800 mb-2">Organization Not Found</h2>
-                <p className="text-yellow-700 mb-4">
-                  We couldn't find this organization. Please re-select your organization.
-                </p>
-                <a 
-                  href="/dashboard" 
-                  className="inline-flex items-center px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700"
-                >
-                  Re-select Organization
-                </a>
-              </div>
-            </div>
-          );
-          
-        case 'CLERK_ERROR':
-        case 'DB_ERROR':
-        case 'FATAL_ERROR':
-        default:
-          return (
-            <div className="p-6">
-              <h1 className="text-2xl font-semibold mb-4">Settings</h1>
-              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                <h2 className="text-lg font-semibold text-red-800 mb-2">Synchronization Error</h2>
-                <p className="text-red-700 mb-4">
-                  We encountered an error while trying to synchronize your organization data.
-                </p>
-                <div className="space-y-2">
-                  <p className="text-sm text-red-600">
-                    Please try the following:
-                  </p>
-                  <ul className="text-sm text-red-600 list-disc list-inside space-y-1">
-                    <li>Refresh this page to retry</li>
-                    <li>Go to the <a href="/dashboard" className="underline hover:text-red-800">Dashboard</a> to re-select your organization</li>
-                    <li>Contact support if the issue persists</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-          );
-      }
-    }
-    
-    // Re-fetch the organization data after successful ensure
-    const { data: retryData, error: retryError } = await supabaseAdmin
-      .from("orgs")
-      .select("id, name, product_name, product_website, plan_type, max_users, max_competitors")
-      .eq('clerk_org_id', clerkOrgId)
-      .single();
-      
-    if (retryError || !retryData) {
-      return (
-        <div className="p-6">
-          <h1 className="text-2xl font-semibold mb-4">Settings</h1>
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-            <h2 className="text-lg font-semibold text-yellow-800 mb-2">Organization Not Found</h2>
-            <p className="text-yellow-700 mb-4">
-              We couldn't find your organization in our database. This might happen if your organization was recently created or if there was a synchronization issue.
-            </p>
-            <div className="space-y-2">
-              <p className="text-sm text-yellow-600">
-                Please try the following:
-              </p>
-              <ul className="text-sm text-yellow-600 list-disc list-inside space-y-1">
-                <li>Refresh this page to retry the synchronization</li>
-                <li>Go to the <a href="/dashboard" className="underline hover:text-yellow-800">Dashboard</a> to re-select your organization</li>
-                <li>Contact support if the issue persists</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      );
-    }
-    
-    // Use the retried data
-    var org = retryData;
-  } else {
-    var org = data;
-  }
-
-  // Get user's role in the org
-  const { data: membership } = await supabaseAdmin
-    .from('org_memberships')
-    .select('role')
-    .eq('clerk_org_id', clerkOrgId)
-    .eq('clerk_user_id', userId)
-    .single();
-
-  const isAdmin = membership?.role === 'admin';
+  // Use role from ensureOrg() result as the single source of truth
+  const isAdmin = res.role === 'admin';
 
   // Get competitors count for plan display
   const { data: competitorsCount, error: competitorsError } = await supabaseAdmin
@@ -267,7 +223,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
         </div>
       )}
       
-      {tab === 'team' && <TeamPanel role={userRole} />}
+      {tab === 'team' && <TeamPanel role={res.role} />}
     </div>
   );
 }
