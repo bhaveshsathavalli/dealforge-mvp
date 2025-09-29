@@ -34,7 +34,7 @@ export async function PATCH(
       
       return NextResponse.json({
         ok: false,
-        error: { code: 'UNAUTHENTICATED', message: '不是 authenticated' }
+        error: { code: 'UNAUTHENTICATED', message: 'Not authenticated' }
       }, { status: 401 });
     }
 
@@ -71,10 +71,10 @@ export async function PATCH(
       }, { status: 403 });
     }
 
-    let body: any;
+    let body: unknown;
     try {
       body = await req.json();
-    } catch (error) {
+    } catch {
       const result = {
         evt: 'result',
         method: 'PATCH',
@@ -84,13 +84,13 @@ export async function PATCH(
       };
       console.log('team.api', JSON.stringify(result));
       
-      return NextResponse.json({
-        ok: false,
-        error: { code: 'BAD_BODY', message: 'Invalid JSON body' }
+      return NextResponse.json({ 
+        ok: false, 
+        error: { code: 'BAD_BODY', message: 'Invalid JSON' }
       }, { status: 400 });
     }
 
-    const { role } = body;
+    const { role } = body as { role?: string };
     
     // Validate role
     if (!role || !['member', 'admin'].includes(role)) {
@@ -109,7 +109,7 @@ export async function PATCH(
       }, { status: 400 });
     }
 
-    const clerkRole = toClerkRole(role);
+    const clerkRole = toClerkRole(role as 'admin' | 'member');
 
     console.log('team.api', JSON.stringify({
       evt: 'role_change_start',
@@ -119,9 +119,39 @@ export async function PATCH(
     }));
 
     const client = await clerkClient();
-    await client.organizations.updateOrganizationMembership({
-      organizationId: ctx.orgId!,
-      membershipId: membershipId,
+    
+    // Check if this is the last admin before changing
+    if (role === 'member') {
+      const list = await client.organizations.getOrganizationMembershipList({
+        organizationId: ctx.orgId!,
+        limit: 200
+      });
+      
+      const adminCount = list.data.filter(m => ['admin','org:admin'].includes(m.role)).length;
+      const target = list.data.find(m => m.id === membershipId);
+      const targetIsAdmin = ['admin','org:admin'].includes(target?.role || '');
+      
+      if (targetIsAdmin && adminCount <= 1) {
+        const result = {
+          evt: 'result',
+          method: 'PATCH',
+          status: 409,
+          payloadKeys: ['ok', 'error'],
+          error: 'LAST_ADMIN',
+          adminCount: adminCount
+        };
+        console.log('team.api', JSON.stringify(result));
+        
+        return NextResponse.json(
+          { ok: false, error: { code: 'LAST_ADMIN', message: 'Cannot remove privileges from the last admin.' }},
+          { status: 409 }
+        );
+      }
+    }
+
+    // Use the correct Clerk SDK method
+    await client.organizationMemberships.updateOrganizationMembership({
+      organizationMembershipId: membershipId,
       role: clerkRole,
     });
 
@@ -161,11 +191,11 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  req: Request,
+  _req: Request,
   { params }: { params: { membershipId: string } }
 ) {
   const membershipId = params.membershipId;
-  const url = new URL(req.url);
+  const url = new URL(_req.url);
   
   console.log('team.api', JSON.stringify({
     evt: 'enter',
@@ -238,7 +268,7 @@ export async function DELETE(
     // Check if this is the last admin before removing
     const list = await client.organizations.getOrganizationMembershipList({
       organizationId: ctx.orgId!,
-      limit: 100
+      limit: 200
     });
     
     const adminCount = list.data.filter(m => ['admin','org:admin'].includes(m.role)).length;
@@ -262,9 +292,9 @@ export async function DELETE(
       }, { status: 409 });
     }
 
-    await client.organizations.deleteOrganizationMembership({
-      organizationId: ctx.orgId!,
-      membershipId: membershipId,
+    // Use the correct Clerk SDK method
+    await client.organizationMemberships.deleteOrganizationMembership({
+      organizationMembershipId: membershipId,
     });
 
     const successResult = {

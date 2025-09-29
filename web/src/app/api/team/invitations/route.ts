@@ -32,18 +32,17 @@ export async function GET() {
     const client = await clerkClient();
     const invitations = await client.organizations.getOrganizationInvitationList({
       organizationId: ctx.orgId!,
+      status: 'pending',
       limit: 100
     });
 
-    // Filter and map pending invites only
-    const pendingInvites = invitations.data
-      .filter(invite => invite.status === 'pending')
-      .map(invite => ({
-        id: invite.id,
-        email: invite.emailAddress,
-        role: fromClerkRole(invite.role),
-        createdAt: invite.createdAt
-      }));
+    // Map pending invites
+    const pendingInvites = invitations.data.map(invite => ({
+      id: invite.id,
+      email: invite.emailAddress,
+      role: fromClerkRole(invite.role),
+      createdAt: invite.createdAt
+    }));
 
     console.log('team.api', { evt: 'invites.list', pendingCount: pendingInvites.length });
 
