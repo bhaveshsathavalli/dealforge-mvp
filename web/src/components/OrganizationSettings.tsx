@@ -26,38 +26,6 @@ interface OrganizationSettingsProps {
 }
 
 export default function OrganizationSettings({ org, competitors, isAdmin, vendor }: OrganizationSettingsProps) {
-  const [detecting, setDetecting] = useState(false);
-
-  const handleDetectWebsite = async () => {
-    if (!vendor?.name?.trim()) {
-      alert('Product name is required to detect website');
-      return;
-    }
-
-    try {
-      setDetecting(true);
-      
-      const response = await fetch('/api/settings/detect-website', {
-        method: 'POST'
-      });
-      
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to detect website');
-      }
-      
-      const { url } = await response.json();
-      // Update the form field directly
-      const websiteField = document.querySelector('input[name="website"]') as HTMLInputElement;
-      if (websiteField) {
-        websiteField.value = url;
-      }
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to detect website');
-    } finally {
-      setDetecting(false);
-    }
-  };
 
 
   return (
@@ -74,7 +42,7 @@ export default function OrganizationSettings({ org, competitors, isAdmin, vendor
             <div>
               <label className="block text-sm font-medium mb-2">Product Name</label>
               <input
-                name="name"
+                name="product_name"
                 type="text"
                 defaultValue={vendor?.name ?? ""}
                 className="w-full border rounded px-3 py-2 text-sm"
@@ -86,23 +54,13 @@ export default function OrganizationSettings({ org, competitors, isAdmin, vendor
             {/* Product Website Input */}
             <div>
               <label className="block text-sm font-medium mb-2">Product Website</label>
-              <div className="flex gap-2">
-                <input
-                  name="website"
-                  type="url"
-                  defaultValue={vendor?.website ?? ""}
-                  className="flex-1 border rounded px-3 py-2 text-sm"
-                  placeholder="https://example.com"
-                />
-                <Button 
-                  type="button"
-                  onClick={handleDetectWebsite}
-                  disabled={detecting || !vendor?.name?.trim()}
-                  className="px-3 py-2 bg-gray-600 hover:bg-gray-700 text-white border border-gray-600 hover:border-gray-700 rounded transition-colors text-sm"
-                >
-                  {detecting ? 'Detecting...' : 'Auto-detect'}
-                </Button>
-              </div>
+              <input
+                name="product_website"
+                type="url"
+                defaultValue={vendor?.website ?? ""}
+                className="w-full border rounded px-4 py-2 text-sm"
+                placeholder="https://example.com"
+              />
             </div>
             
             <button 

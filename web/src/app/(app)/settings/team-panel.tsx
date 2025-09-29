@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useUser } from '@clerk/nextjs';
-import { readJsonSafely } from '@/lib/readJsonSafely';
+import { safeJson } from '@/lib/safeJson';
 
 type MemberRow = {
   membershipId: string;
@@ -44,7 +44,7 @@ export default function TeamPanel({ role }: TeamPanelProps) {
         // Load members
         const membersRes = await fetch('/api/team/members');
         if (membersRes.ok) {
-          const membersData = await readJsonSafely(membersRes);
+          const membersData = await safeJson(membersRes);
           if (!cancelled && membersData?.ok) {
             setMembers(membersData.data?.members || []);
           }
@@ -54,7 +54,7 @@ export default function TeamPanel({ role }: TeamPanelProps) {
         if (isAdmin) {
           const invitesRes = await fetch('/api/team/invitations');
           if (invitesRes.ok) {
-            const invitesData = await readJsonSafely(invitesRes);
+            const invitesData = await safeJson(invitesRes);
             if (!cancelled && invitesData?.ok) {
               setInvitations(invitesData.data?.invitations || []);
             }
@@ -79,7 +79,7 @@ export default function TeamPanel({ role }: TeamPanelProps) {
                         body: JSON.stringify({ email: inviteEmail, role: 'member' }),
     });
     
-    const data = await readJsonSafely(res);
+    const data = await safeJson(res);
     
     if (res.ok && data?.ok) {
       setInviteEmail('');
@@ -88,7 +88,7 @@ export default function TeamPanel({ role }: TeamPanelProps) {
       // Refresh invitations list
       const invitesRes = await fetch('/api/team/invitations');
       if (invitesRes.ok) {
-        const invitesData = await readJsonSafely(invitesRes);
+        const invitesData = await safeJson(invitesRes);
         if (invitesData?.ok) {
           setInvitations(invitesData.data?.invitations || []);
         }
@@ -100,50 +100,90 @@ export default function TeamPanel({ role }: TeamPanelProps) {
 
   async function changeRole(membershipId: string, newRole: 'admin'|'member') {
     if (!isAdmin) return;
-    const res = await fetch(`/api/team/members/${membershipId}`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ role: newRole }),
-    });
     
-    const data = await readJsonSafely(res);
-    
-    if (res.ok && data?.ok) {
-      setMembers(ms => ms.map(m => m.membershipId === membershipId ? { ...m, role: newRole } : m));
-      // Refresh the team list to ensure consistency
-      const teamRes = await fetch('/api/team/members');
-      if (teamRes.ok) {
-        const teamData = await readJsonSafely(teamRes);
-        if (teamData?.ok) {
-          setMembers(teamData.data?.members || []);
+    try {
+      console.log('team.ui', { evt: 'change_role_start', membershipId, role: newRole });
+      
+      const res = await fetch(`/api/team/members/${membershipId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: newRole }),
+      });
+      
+      const data = await safeJson(res);
+      
+      if (res.ok && data?.ok) {
+        console.log('team.ui', { evt: 'change_role_success', membershipId });
+        
+        // Update UI immediately
+        setMembers(ms => ms.map(m => m.membershipId === membershipId ? { ...m, role: newRole } : m));
+        
+        // Refresh from server for consistency
+        const teamRes = await fetch('/api/team/members');
+        if (teamRes.ok) {
+          const teamData = await safeJson(teamRes);
+          if (teamData?.ok) {
+            setMembers(teamData.data?.members || []);
+          }
+        }
+      } else {
+        const errorMsg = data?.error?.message || `HTTP ${res.status}`;
+        
+        // Special handling for LAST_ADMIN error
+        if (data?.error?.code === 'LAST_ADMIN') {
+          alert("You can't remove admin privileges from the last admin. Make someone else admin first.");
+        } else {
+          console.error('team.ui', { evt: 'change_role_failed', membershipId, error: errorMsg });
+          alert(`Role change failed: ${errorMsg}`);
         }
       }
-    } else {
-      alert('Role change failed: ' + (data?.error?.message || 'Unknown error'));
+    } catch (error: any) {
+      console.error('team.ui', { evt: 'change_role_error', membershipId, error: error.message });
+      alert(`Role change failed: ${error.message}`);
     }
   }
 
   async function remove(membershipId: string) {
     if (!isAdmin) return;
     if (!confirm('Remove this member?')) return;
-    const res = await fetch(`/api/team/members/${membershipId}`, {
-      method: 'DELETE',
-    });
     
-    const data = await readJsonSafely(res);
-    
-    if (res.ok && data?.ok) {
-      setMembers(ms => ms.filter(m => m.membershipId !== membershipId));
-      // Refresh the team list to ensure consistency
-      const teamRes = await fetch('/api/team/members');
-      if (teamRes.ok) {
-        const teamData = await readJsonSafely(teamRes);
-        if (teamData?.ok) {
-          setMembers(teamData.data?.members || []);
+    try {
+      console.log('team.ui', { evt: 'remove_start', membershipId });
+      
+      const res = await fetch(`/api/team/members/${membershipId}`, {
+        method: 'DELETE',
+      });
+      
+      const data = await safeJson(res);
+      
+      if (res.ok && data?.ok) {
+        console.log('team.ui', { evt: 'remove_success', membershipId });
+        
+        // Update UI immediately
+        setMembers(ms => ms.filter(m => m.membershipId !== membershipId));
+        
+        // Refresh from server for consistency
+        const teamRes = await fetch('/api/team/members');
+        if (teamRes.ok) {
+          const teamData = await safeJson(teamRes);
+          if (teamData?.ok) {
+            setMembers(teamData.data?.members || []);
+          }
+        }
+      } else {
+        const errorMsg = data?.error?.message || `HTTP ${res.status}`;
+        
+        // Special handling for LAST_ADMIN error
+        if (data?.error?.code === 'LAST_ADMIN') {
+          alert("You can't remove the last admin. Make someone else admin first.");
+        } else {
+          console.error('team.ui', { evt: 'remove_failed', membershipId, error: errorMsg });
+          alert(`Remove failed: ${errorMsg}`);
         }
       }
-    } else {
-      alert('Remove failed: ' + (data?.error?.message || 'Unknown error'));
+    } catch (error: any) {
+      console.error('team.ui', { evt: 'remove_error', membershipId, error: error.message });
+      alert(`Remove failed: ${error.message}`);
     }
   }
 
@@ -155,7 +195,7 @@ export default function TeamPanel({ role }: TeamPanelProps) {
       method: 'DELETE',
     });
     
-    const data = await readJsonSafely(res);
+    const data = await safeJson(res);
     
     if (res.ok && data?.ok) {
       setInvitations(inv => inv.filter(i => i.id !== invitationId));

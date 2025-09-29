@@ -20,8 +20,11 @@ export async function GET() {
     payload.data.canInvite = ctx.role === 'admin'
     payload.data.roles = {
       uiRole: ctx.role,
+      clerkRole: ctx.role === 'admin' ? 'org:admin' : 'org:member',
       note: 'UI roles admin/member; mapped to org:admin/org:member when calling Clerk'
     }
+    // TODO: Add billing/subscription check here
+    payload.data.canCreateOrg = ctx.role === 'admin' // For now, just admin check
     if (ctx.orgId) {
       try {
         const client = await clerkClient()

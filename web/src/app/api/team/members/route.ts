@@ -3,11 +3,28 @@ import { resolveOrgContext } from '@/server/orgContext';
 import { clerkClient } from '@clerk/nextjs/server';
 import { fromClerkRole } from '@/server/roles';
 
-export async function GET() {
+export async function GET(req: Request) {
+  const url = new URL(req.url);
+  
+  console.log('team.api', JSON.stringify({
+    evt: 'enter',
+    method: 'GET',
+    url: '/api/team/members',
+    pathname: url.pathname
+  }));
+
   try {
     const ctx = await resolveOrgContext();
     
     if (!ctx.ok) {
+      console.log('team.api', JSON.stringify({
+        evt: 'result',
+        method: 'GET',
+        status: 401,
+        payloadKeys: ['ok', 'error'],
+        authError: ctx.reason
+      }));
+      
       return NextResponse.json({
         ok: false,
         error: { code: 'UNAUTHENTICATED', message: 'Not authenticated' }
@@ -15,6 +32,14 @@ export async function GET() {
     }
 
     if (!ctx.orgId) {
+      console.log('team.api', JSON.stringify({
+        evt: 'result',
+        method: 'GET',
+        status: 200,
+        payloadKeys: ['ok', 'data'],
+        noOrg: true
+      }));
+      
       return NextResponse.json({
         ok: true,
         data: { members: [] }
@@ -42,21 +67,30 @@ export async function GET() {
       createdAt: membership.createdAt
     }));
 
-    console.log('team.api', { evt: 'members.list', count: members.length });
+    console.log('team.api', JSON.stringify({
+      evt: 'result',
+      method: 'GET',
+      status: 200,
+      payloadKeys: ['ok', 'data'],
+      memberCount: members.length
+    }));
 
     return NextResponse.json({
       ok: true,
       data: { members }
-    });
+    }, { status: 200 });
 
   } catch (error: any) {
     const clerkError = error?.errors?.[0];
     
     console.error('team.api', JSON.stringify({
-      evt: 'members.error',
-      code: clerkError?.code,
+      evt: 'result',
+      method: 'GET',
+      status: 500,
+      payloadKeys: ['ok', 'error'],
+      clerkError: clerkError?.code,
       message: clerkError?.message,
-      raw: error.message
+      rawError: error.message
     }));
 
     return NextResponse.json({

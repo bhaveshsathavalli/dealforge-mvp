@@ -7,17 +7,47 @@ export async function PATCH(
   req: Request,
   { params }: { params: { membershipId: string } }
 ) {
+  const membershipId = params.membershipId;
+  const url = new URL(req.url);
+  
+  console.log('team.api', JSON.stringify({
+    evt: 'enter',
+    method: 'PATCH',
+    membershipId: membershipId,
+    params: {...params},
+    url: url.pathname,
+    bodyPresent: req.body ? 'yes' : 'no'
+  }));
+
   try {
     const ctx = await resolveOrgContext();
     
     if (!ctx.ok) {
+      const result = {
+        evt: 'result',
+        method: 'PATCH',
+        status: 401,
+        payloadKeys: ['ok', 'error'],
+        authError: ctx.reason
+      };
+      console.log('team.api', JSON.stringify(result));
+      
       return NextResponse.json({
         ok: false,
-        error: { code: 'UNAUTHENTICATED', message: 'Not authenticated' }
+        error: { code: 'UNAUTHENTICATED', message: '不是 authenticated' }
       }, { status: 401 });
     }
 
     if (!ctx.orgId) {
+      const result = {
+        evt: 'result',
+        method: 'PATCH',
+        status: 400,
+        payloadKeys: ['ok', 'error'],
+        error: 'NO_ORG'
+      };
+      console.log('team.api', JSON.stringify(result));
+      
       return NextResponse.json({
         ok: false,
         error: { code: 'NO_ORG', message: 'No organization selected' }
@@ -26,6 +56,15 @@ export async function PATCH(
 
     // Require admin role
     if (ctx.role !== 'admin') {
+      const result = {
+        evt: 'result',
+        method: 'PATCH',
+        status: 403,
+        payloadKeys: ['ok', 'error'],
+        role: ctx.role
+      };
+      console.log('team.api', JSON.stringify(result));
+      
       return NextResponse.json({
         ok: false,
         error: { code: 'FORBIDDEN', message: 'Admin access required' }
@@ -36,6 +75,15 @@ export async function PATCH(
     try {
       body = await req.json();
     } catch (error) {
+      const result = {
+        evt: 'result',
+        method: 'PATCH',
+        status: 400,
+        payloadKeys: ['ok', 'error'],
+        parseError: 'BAD_BODY'
+      };
+      console.log('team.api', JSON.stringify(result));
+      
       return NextResponse.json({
         ok: false,
         error: { code: 'BAD_BODY', message: 'Invalid JSON body' }
@@ -46,37 +94,61 @@ export async function PATCH(
     
     // Validate role
     if (!role || !['member', 'admin'].includes(role)) {
+      const result = {
+        evt: 'result',
+        method: 'PATCH',
+        status: 400,
+        payloadKeys: ['ok', 'error'],
+        invalidRole: role
+      };
+      console.log('team.api', JSON.stringify(result));
+      
       return NextResponse.json({
         ok: false,
-        error: { code: 'INVALID_ROLE', message: 'Role must be "member" or "admin"' }
+        error: { code: 'INVALID_ROLE', message: 'role must be member | admin' }
       }, { status: 400 });
     }
 
     const clerkRole = toClerkRole(role);
 
-    console.log('team.api', { evt: 'member.role.change', membershipId: params.membershipId, role, clerkRole });
+    console.log('team.api', JSON.stringify({
+      evt: 'role_change_start',
+      membershipId: membershipId,
+      uiRole: role,
+      clerkRole: clerkRole
+    }));
 
     const client = await clerkClient();
     await client.organizations.updateOrganizationMembership({
       organizationId: ctx.orgId!,
-      membershipId: params.membershipId,
+      membershipId: membershipId,
       role: clerkRole,
     });
 
-    console.log('team.api', { evt: 'member.role.change', success: true });
+    const successResult = {
+      evt: 'result',
+      method: 'PATCH',
+      status: 200,
+      payloadKeys: ['ok'],
+      success: true
+    };
+    console.log('team.api', JSON.stringify(successResult));
 
     return NextResponse.json({ ok: true }, { status: 200 });
 
   } catch (error: any) {
     const clerkError = error?.errors?.[0];
     
-    console.error('team.api', JSON.stringify({
-      evt: 'member.role.change.error',
-      membershipId: params.membershipId,
-      code: clerkError?.code,
+    const errorResult = {
+      evt: 'result',
+      method: 'PATCH',
+      status: 500,
+      payloadKeys: ['ok', 'error'],
+      clerkError: clerkError?.code,
       message: clerkError?.message,
-      raw: error.message
-    }));
+      rawError: error.message
+    };
+    console.error('team.api', JSON.stringify(errorResult));
 
     return NextResponse.json({
       ok: false,
@@ -92,10 +164,31 @@ export async function DELETE(
   req: Request,
   { params }: { params: { membershipId: string } }
 ) {
+  const membershipId = params.membershipId;
+  const url = new URL(req.url);
+  
+  console.log('team.api', JSON.stringify({
+    evt: 'enter',
+    method: 'DELETE',
+    membershipId: membershipId,
+    params: {...params},
+    url: url.pathname,
+    bodyPresent: 'no' // DELETE should never have body
+  }));
+
   try {
     const ctx = await resolveOrgContext();
     
     if (!ctx.ok) {
+      const result = {
+        evt: 'result',
+        method: 'DELETE',
+        status: 401,
+        payloadKeys: ['ok', 'error'],
+        authError: ctx.reason
+      };
+      console.log('team.api', JSON.stringify(result));
+      
       return NextResponse.json({
         ok: false,
         error: { code: 'UNAUTHENTICATED', message: 'Not authenticated' }
@@ -103,6 +196,15 @@ export async function DELETE(
     }
 
     if (!ctx.orgId) {
+      const result = {
+        evt: 'result',
+        method: 'DELETE',
+        status: 400,
+        payloadKeys: ['ok', 'error'],
+        error: 'NO_ORG'
+      };
+      console.log('team.api', JSON.stringify(result));
+      
       return NextResponse.json({
         ok: false,
         error: { code: 'NO_ORG', message: 'No organization selected' }
@@ -111,13 +213,25 @@ export async function DELETE(
 
     // Require admin role
     if (ctx.role !== 'admin') {
+      const result = {
+        evt: 'result',
+        method: 'DELETE',
+        status: 403,
+        payloadKeys: ['ok', 'error'],
+        role: ctx.role
+      };
+      console.log('team.api', JSON.stringify(result));
+      
       return NextResponse.json({
         ok: false,
         error: { code: 'FORBIDDEN', message: 'Admin access required' }
       }, { status: 403 });
     }
 
-    console.log('team.api', { evt: 'member.remove', membershipId: params.membershipId });
+    console.log('team.api', JSON.stringify({
+      evt: 'remove_check_start',
+      membershipId: membershipId
+    }));
 
     const client = await clerkClient();
     
@@ -128,36 +242,55 @@ export async function DELETE(
     });
     
     const adminCount = list.data.filter(m => ['admin','org:admin'].includes(m.role)).length;
-    const target = list.data.find(m => m.id === params.membershipId);
+    const target = list.data.find(m => m.id === membershipId);
     const targetIsAdmin = ['admin','org:admin'].includes(target?.role || '');
     
     if (targetIsAdmin && adminCount <= 1) {
-      console.log('team.api', { evt: 'member.remove.last_admin', membershipId: params.membershipId });
+      const lastAdminResult = {
+        evt: 'result',
+        method: 'DELETE',
+        status: 409,
+        payloadKeys: ['ok', 'error'],
+        error: 'LAST_ADMIN',
+        adminCount: adminCount
+      };
+      console.log('team.api', JSON.stringify(lastAdminResult));
+      
       return NextResponse.json({
         ok: false,
-        error: { code: 'LAST_ADMIN', message: 'Cannot remove the last admin' }
+        error: { code: 'LAST_ADMIN', message: "Cannot remove the last admin" }
       }, { status: 409 });
     }
 
     await client.organizations.deleteOrganizationMembership({
       organizationId: ctx.orgId!,
-      membershipId: params.membershipId,
+      membershipId: membershipId,
     });
 
-    console.log('team.api', { evt: 'member.remove', success: true });
+    const successResult = {
+      evt: 'result',
+      method: 'DELETE',
+      status: 200,
+      payloadKeys: ['ok'],
+      success: true
+    };
+    console.log('team.api', JSON.stringify(successResult));
 
     return NextResponse.json({ ok: true }, { status: 200 });
 
   } catch (error: any) {
     const clerkError = error?.errors?.[0];
     
-    console.error('team.api', JSON.stringify({
-      evt: 'member.remove.error',
-      membershipId: params.membershipId,
-      code: clerkError?.code,
+    const errorResult = {
+      evt: 'result',
+      method: 'DELETE',
+      status: 500,
+      payloadKeys: ['ok', 'error'],
+      clerkError: clerkError?.code,
       message: clerkError?.message,
-      raw: error.message
-    }));
+      rawError: error.message
+    };
+    console.error('team.api', JSON.stringify(errorResult));
 
     return NextResponse.json({
       ok: false,
