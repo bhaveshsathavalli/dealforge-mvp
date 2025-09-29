@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { resolveOrgContext } from '@/server/orgContext';
 import { clerkClient } from '@clerk/nextjs/server';
+import { fromClerkRole } from '@/server/roles';
 
 export async function GET() {
   try {
@@ -37,7 +38,7 @@ export async function GET() {
         ? `${membership.publicUserData.firstName} ${membership.publicUserData.lastName}`
         : membership.publicUserData?.firstName || membership.publicUserData?.identifier || '',
       imageUrl: membership.publicUserData?.imageUrl || null,
-      role: membership.role,
+      role: fromClerkRole(membership.role),
       createdAt: membership.createdAt
     }));
 

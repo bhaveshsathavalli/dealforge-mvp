@@ -33,18 +33,42 @@ export async function DELETE(
 
     const { invitationId } = params;
 
-    console.log('team.api', { evt: 'invites.revoke', invitationId, orgId: ctx.orgId });
+    console.log('team.api', { evt: 'invites.revoke', invitationId });
 
-    // Revoke invitation via Clerk
-    const client = await clerkClient();
-    await client.organizations.revokeOrganizationInvitation(invitationId);
+    try {
+      const client = await clerkClient();
+      await client.organizations.revokeOrganizationInvitation({
+        organizationId: ctx.orgId!,
+        invitationId
+      });
 
-    console.log('team.api', { evt: 'invites.revoke', success: true });
+      console.log('team.api', { evt: 'invites.revoke', success: true });
 
-    return NextResponse.json({
-      ok: true,
-      data: { success: true }
-    });
+      return NextResponse.json({
+        ok: true
+      });
+
+    } catch (revokeError: any) {
+      // Handle specific Clerk errors for invitation status
+      if (revokeError?.status === 404) {
+        console.log('team.api', { evt: 'invites.revoke.not_found', invitationId });
+        return NextResponse.json({
+          ok: false,
+          error: { code: 'NOT_FOUND', message: 'Invitation not found' }
+        }, { status: 404 });
+      }
+
+      // Check if invite is not pending
+      if (revokeError?.message?.includes('status') || revokeError?.message?.includes('accepted')) {
+        console.log('team.api', { evt: 'invites.revoke.invalid_status', invitationId });
+        return NextResponse.json({
+          ok: false,
+          error: { code: 'INVALID_STATUS', message: 'Can only cancel pending invitations' }
+        }, { status: 409 });
+      }
+
+      throw revokeError;
+    }
 
   } catch (error: any) {
     const clerkError = error?.errors?.[0];

@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server'
 import { resolveOrgContext } from '@/server/orgContext'
 import { clerkClient } from '@clerk/nextjs/server'
+import { toClerkRole } from '@/server/roles'
 
 export async function GET() {
   const ctx = await resolveOrgContext()
@@ -22,6 +23,10 @@ export async function GET() {
         const client = await clerkClient()
         const org = await client.organizations.getOrganization({ organizationId: ctx.orgId })
         payload.data.orgExists = !!org?.id
+        payload.data.roleKeyTest = {
+          adminToClerk: toClerkRole('admin'),
+          memberToClerk: toClerkRole('member')
+        }
       } catch (e: any) {
         payload.data.clerkError = { code: e?.errors?.[0]?.code, message: e?.message }
       }

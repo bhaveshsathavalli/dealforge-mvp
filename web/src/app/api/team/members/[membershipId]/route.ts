@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { resolveOrgContext } from '@/server/orgContext';
 import { clerkClient } from '@clerk/nextjs/server';
 import { z } from 'zod';
+import { UiRole, toClerkRole } from '@/server/roles';
 
 const updateRoleSchema = z.object({
   role: z.enum(['member', 'admin'])
@@ -48,22 +49,37 @@ export async function PATCH(
 
     const { membershipId } = params;
     const { role } = validation.data;
+    const clerkRole = toClerkRole(role as UiRole);
 
-    // Map UI role to Clerk role
-    const mappedRole = role === 'admin' ? 'org:admin' : 'org:member';
+    console.log('team.api', { evt: 'member.role.change', membershipId, role, clerkRole });
 
-    console.log('team.api', { evt: 'member.role.change', membershipId, role, mappedRole });
+    try {
+      // Update member role via Clerk
+      const client = await clerkClient();
+      await client.organizations.updateOrganizationMembership({
+        organizationId: ctx.orgId!,
+        membershipId,
+        role: clerkRole
+      });
 
-    // Update member role via Clerk
-    const client = await clerkClient();
-    await client.organizations.updateOrganizationMembership(membershipId, { role: mappedRole });
+      console.log('team.api', { evt: 'member.role.change', success: true });
 
-    console.log('team.api', { evt: 'member.role.change', success: true });
+      return NextResponse.json({
+        ok: true
+      });
 
-    return NextResponse.json({
-      ok: true,
-      data: { success: true }
-    });
+    } catch (updateError: any) {
+      // Handle "last admin" scenario
+      if (updateError?.message?.includes('last admin') || updateError?.message?.includes('at least one admin')) {
+        console.log('team.api', { evt: 'member.role.last_admin', membershipId });
+        return NextResponse.json({
+          ok: false,
+          error: { code: 'LAST_ADMIN', message: 'Cannot remove the last admin' }
+        }, { status: 409 });
+      }
+
+      throw updateError;
+    }
 
   } catch (error: any) {
     const clerkError = error?.errors?.[0];
@@ -121,13 +137,15 @@ export async function DELETE(
 
     // Remove member via Clerk
     const client = await clerkClient();
-    await client.organizations.deleteOrganizationMembership(membershipId);
+    await client.organizations.deleteOrganizationMembership({
+      organizationId: ctx.orgId!,
+      membershipId
+    });
 
     console.log('team.api', { evt: 'member.remove', success: true });
 
     return NextResponse.json({
-      ok: true,
-      data: { success: true }
+      ok: true
     });
 
   } catch (error: any) {

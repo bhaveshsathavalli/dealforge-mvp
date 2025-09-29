@@ -10,17 +10,16 @@ type MemberRow = {
   email: string;
   name: string;
   imageUrl?: string | null;
-  role: 'org:admin' | 'org:member';
+  role: 'admin' | 'member';
   createdAt: string;
 };
 
 type InvitationRow = {
-  invitationId: string;
+  id: string;
   email: string;
-  role: 'org:admin' | 'org:member';
+  role: 'admin' | 'member';
   status: string;
   createdAt: string;
-  updatedAt: string;
 };
 
 interface TeamPanelProps {
@@ -99,7 +98,7 @@ export default function TeamPanel({ role }: TeamPanelProps) {
     }
   }
 
-  async function changeRole(membershipId: string, newRole: 'org:admin'|'org:member') {
+  async function changeRole(membershipId: string, newRole: 'admin'|'member') {
     if (!isAdmin) return;
     const res = await fetch(`/api/team/members/${membershipId}`, {
       method: 'PATCH',
@@ -195,20 +194,20 @@ export default function TeamPanel({ role }: TeamPanelProps) {
 
                 <div className="flex items-center gap-3">
                   <span className="text-xs px-2 py-1 rounded bg-gray-100">
-                    {m.role === 'org:admin' ? 'Admin' : 'Member'}
+                    {m.role === 'admin' ? 'Admin' : 'Member'}
                   </span>
 
                   {isAdmin && user?.id !== m.userId && (
                     <>
-                      <select
-                        className="text-sm border rounded px-2 py-1"
-                        value={m.role}
-                        onChange={(e) => changeRole(m.membershipId, e.target.value as 'org:admin'|'org:member')}
-                        data-testid="member-role"
-                      >
-                        <option key="org:member" value="org:member">Member</option>
-                        <option key="org:admin" value="org:admin">Admin</option>
-                      </select>
+                          <select
+                            className="text-sm border rounded px-2 py-1"
+                            value={m.role}
+                            onChange={(e) => changeRole(m.membershipId, e.target.value as 'admin'|'member')}
+                            data-testid="member-role"
+                          >
+                            <option key="member" value="member">Member</option>
+                            <option key="admin" value="admin">Admin</option>
+                          </select>
 
                       <button
                         onClick={() => remove(m.membershipId)}
@@ -243,11 +242,11 @@ export default function TeamPanel({ role }: TeamPanelProps) {
 
                 <div className="flex items-center gap-3">
                   <span className="text-xs px-2 py-1 rounded bg-yellow-100">
-                    {inv.role === 'org:admin' ? 'Admin' : 'Member'}
+                    {inv.role === 'admin' ? 'Admin' : 'Member'}
                   </span>
 
                   <button
-                    onClick={() => cancelInvitation(inv.invitationId)}
+                    onClick={() => cancelInvitation(inv.id)}
                     className="text-sm text-red-600 hover:underline"
                     data-testid="invite-cancel"
                   >

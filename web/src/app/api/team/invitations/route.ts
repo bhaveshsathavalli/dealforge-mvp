@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { resolveOrgContext } from '@/server/orgContext';
 import { clerkClient } from '@clerk/nextjs/server';
 import { z } from 'zod';
+import { UiRole, toClerkRole, fromClerkRole } from '@/server/roles';
 
 const inviteSchema = z.object({
   email: z.string().email('Invalid email address'),
@@ -28,26 +29,29 @@ export async function GET() {
 
     console.log('team.api', { evt: 'invites.list', orgId: ctx.orgId });
 
-    // Get invitations from Clerk as single source of truth
+    // Get invitations from Clerk - only pending invites
     const client = await clerkClient();
     const invitations = await client.organizations.getOrganizationInvitationList({
-      organizationId: ctx.orgId
+      organizationId: ctx.orgId!,
+      limit: 100
     });
 
-    const formattedInvitations = invitations.data.map(invitation => ({
-      invitationId: invitation.id,
-      email: invitation.emailAddress,
-      role: invitation.role,
-      status: invitation.status,
-      createdAt: invitation.createdAt,
-      updatedAt: invitation.updatedAt
-    }));
+    // Filter and map pending invites only
+    const pendingInvites = invitations.data
+      .filter(invite => invite.status === 'pending')
+      .map(invite => ({
+        id: invite.id,
+        email: invite.emailAddress,
+        role: fromClerkRole(invite.role),
+        status: invite.status,
+        createdAt: invite.createdAt
+      }));
 
-    console.log('team.api', { evt: 'invites.list', count: formattedInvitations.length });
+    console.log('team.api', { evt: 'invites.list', pendingCount: pendingInvites.length });
 
     return NextResponse.json({
       ok: true,
-      data: { invitations: formattedInvitations }
+      data: { invitations: pendingInvites }
     });
 
   } catch (error: any) {
@@ -107,34 +111,23 @@ export async function POST(req: Request) {
     }
 
     const { email, role } = validation.data;
+    const clerkRole = toClerkRole(role as UiRole);
 
-    // Map UI role to Clerk role
-    const mappedRole = role === 'admin' ? 'org:admin' : 'org:member';
-
-    console.log('team.api', { evt: 'invites.create', email, role, mappedRole, orgId: ctx.orgId });
+    console.log('team.api', { evt: 'invites.create', email, role, clerkRole });
 
     // Create invitation via Clerk
     const client = await clerkClient();
-    const invitation = await client.organizations.createOrganizationInvitation({
+    await client.organizations.createOrganizationInvitation({
       organizationId: ctx.orgId!,
       emailAddress: email,
-      role: mappedRole,
+      role: clerkRole,
+      inviterUserId: ctx.userId
     });
 
-    console.log('team.api', { evt: 'invites.create', invitationId: invitation.id });
+    console.log('team.api', { evt: 'invites.create', success: true });
 
     return NextResponse.json({
-      ok: true,
-      data: { 
-        invitation: {
-          invitationId: invitation.id,
-          email: invitation.emailAddress,
-          role: invitation.role,
-          status: invitation.status,
-          createdAt: invitation.createdAt,
-          updatedAt: invitation.updatedAt
-        }
-      }
+      ok: true
     });
 
   } catch (error: any) {
